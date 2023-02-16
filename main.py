@@ -1,4 +1,5 @@
-from X2D import OOK, BiphaseMark, Manchester, X2D, parse_x2d_message, format_x2d_message, bytes_to_bitstream
+import random
+from X2D import Processor, OOK, BiphaseMark, Manchester, X2D, parse_x2d_message, format_x2d_message, bytes_to_bitstream, set_or_extend
 
 
 #
@@ -14,19 +15,75 @@ def print_rflink_line(msg):
 
 def print_message(name, msgs):
     print("#" * 80 + "\n" + name + "\n" + "#" * 80)
+    assert len(msgs) > 0
     for msg in msgs:
         print(msg)
     print("")
+
+
+def get_or_create(context, name, creator):
+    if name not in context:
+        context[name] = creator()
+    return context[name]
+
+
+class RFLinkDecoder(Processor):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._bit = 0
+
+    def process(self, in_data):
+        out_data = bytearray()
+        for i in in_data:
+            if 290 < i < 340:
+                out_data.extend([self._bit, self._bit])
+                self._bit = 1 - self._bit
+            elif 80 < i < 130:
+                out_data.append(self._bit)
+                self._bit = 1 - self._bit
+            else:
+                self.error(f"Invalid pulse: {i}")
+        return out_data
+
+
+class X2MessageDecoder(Processor):
+    def process(self, in_data):
+        out_data = []
+        if in_data is not None:
+            for m in in_data:
+                out_data.append(parse_x2d_message(m))
+        return out_data
+
+
+class X2MessageEncoder(Processor):
+    def process(self, in_data):
+        out_data = []
+        if in_data is not None:
+            for m in in_data:
+                out_data.append(format_x2d_message(m))
+        return out_data
+
+
+def segmentation(fct, data, max_count, *args, **kwargs):
+    result = None
+    context = {}
+    while len(data) > 0:
+        l = random.randint(1, max_count)
+        result = set_or_extend(result, fct(data[0:l], context=context, *args, **kwargs))
+        del data[:l]
+    return result
 
 
 #
 # Process different sources
 #
 
-def get_messages_from_baud(in_data_1, check=False):
-    in_data_2 = BiphaseMark.Decoder().process(in_data_1)
-    in_data_3 = X2D.Decoder().process(in_data_2)
-    msgs = [parse_x2d_message(d) for d in in_data_3]
+def get_messages_from_baud(in_data_1, check=False, context=None):
+    if context is None:
+        context = {}
+    in_data_2 = get_or_create(context, "BiphaseMark.Decoder", lambda: BiphaseMark.Decoder()).process(in_data_1)
+    in_data_3 = get_or_create(context, "X2D.Decoder", lambda: X2D.Decoder()).process(in_data_2)
+    msgs = get_or_create(context, "X2DMessageDecoder", lambda: X2MessageDecoder()).process(in_data_3)
     if check:
         out_data_3 = [format_x2d_message(m) for m in msgs]
         out_data_2 = X2D.Encoder().process(out_data_3)
@@ -36,45 +93,42 @@ def get_messages_from_baud(in_data_1, check=False):
     return msgs
 
 
-def get_messages_from_raw(in_data_1, sample_rate, symbol_rate, check=False):
-    in_data_2 = OOK.Decoder(sample_rate, symbol_rate).process(in_data_1)
-    return get_messages_from_baud(in_data_2, check)
+def get_messages_from_raw(in_data_1, sample_rate, symbol_rate, check=False, context=None):
+    if context is None:
+        context = {}
+    in_data_2 = get_or_create(context, "OOK.Decoder", lambda: OOK.Decoder(sample_rate, symbol_rate, verbose=False)).process(in_data_1)
+    return get_messages_from_baud(in_data_2, check, context)
 
 
-def get_messages_from_cc1101_manchester(in_data_1, check=False):
-    in_data_2 = bytearray([0])
-    in_data_2.extend(Manchester.Encoder().process(bytes_to_bitstream(in_data_1)))
-    return get_messages_from_baud(in_data_2, check)
+def get_messages_from_cc1101_manchester(in_data_1, check=False, context=None):
+    if context is None:
+        context = {}
+    in_data_2 = get_or_create(context, "Manchester.Encoder", lambda: Manchester.Encoder(bytearray([0]))).process(bytes_to_bitstream(in_data_1))
+    return get_messages_from_baud(in_data_2, check, context)
 
 
-def get_messages_from_rflink_debug(in_data_1, check=False):
-    in_data_2 = bytearray()
-    bit = 0
-    for i in in_data_1:
-        if 290 < i < 340:
-            in_data_2.extend([bit, bit])
-            bit = 1 - bit
-        elif 80 < i < 130:
-            in_data_2.append(bit)
-            bit = 1 - bit
-        else:
-            print(f"Ignored pulse: {i}")
-    return get_messages_from_baud(in_data_2, check)
+def get_messages_from_rflink_debug(in_data_1, check=False, context=None):
+    if context is None:
+        context = {}
+    in_data_2 = get_or_create(context, "RFLinkDecoder", lambda: RFLinkDecoder(throw=False)).process(in_data_1)
+    return get_messages_from_baud(in_data_2, check, context)
 
 
 #
-# Process sources
+# Process the data
 #
 
 with open("raw.bin", 'rb') as file:
     in_data_0 = bytearray(file.read())
-    msgs = get_messages_from_raw(in_data_0, 2000000, 4820, True)
+    msgs = segmentation(get_messages_from_raw, in_data_0, int(2000000/4820),  sample_rate=2000000, symbol_rate=4820)
     print_message("raw.bin", msgs)
+
 
 with open("baud.bin") as file:
     data = bytearray([1 if a == '1' else 0 for a in file.read()])
-    msgs = get_messages_from_baud(data)
+    msgs = segmentation(get_messages_from_baud, data, 64)
     print_message("baud.bin", msgs)
+
 
 AssoArea3 = [0x55, 0x7f, 0x5d, 0xa4, 0xca, 0x95, 0x32, 0x52, 0x55, 0x3f, 0x27, 0xff, 0xc0]
 AssoArea2 = [0x55, 0x7f, 0x5d, 0xa4, 0xca, 0xD5, 0x32, 0x52, 0x55, 0x3f, 0x18, 0x00, 0x3f]

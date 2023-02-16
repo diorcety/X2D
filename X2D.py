@@ -5,13 +5,22 @@ from enum import IntEnum
 from itertools import repeat
 
 
-def _count_leading(data, d=None):
-    for i in range(len(data)):
+def _count_leading(data, d=None, offset=0):
+    while offset < len(data):
         if d is None:
-            d = data[i]
-        if d is not None and data[i] != d:
-            return d, i
-    return d, 0
+            d = data[offset]
+        if d is not None and data[offset] != d:
+            return d, offset, 0
+        offset += 1
+    return d, 0, max(offset-1, 0)
+
+
+def set_or_extend(current, to_add):
+    if current is None:
+        current = to_add
+    else:
+        current.extend(to_add)
+    return current
 
 
 #
@@ -58,7 +67,7 @@ class Processor(object):
 
     def info(self, info):
         if self._verbose:
-            print(info)
+            print(f"{self} - {info}")
 
     def error(self, error):
         if self._throw:
@@ -77,20 +86,25 @@ class OOK(object):
             self._threshold = sample_rate / symbol_rate
             self._error_threshold = self._threshold * error
             self._buffered_data = bytearray()
+            self._offset = 0
+            self._count_leading_cache = 0
 
         def process(self, in_data):
-            out_data = bytearray()
-            self._buffered_data.extend(in_data)
+            out_data = None
+            if in_data is not None:
+                self._buffered_data.extend(in_data)
             while True:
-                bit, count = _count_leading(self._buffered_data)
-                if count == 0:
+                bit, count, self._count_leading_cache = _count_leading(self._buffered_data, offset=self._count_leading_cache)
+                if count <= 0:
                     # Not enough data
                     break
                 for i in range(1, 3):
                     if (self._threshold - self._error_threshold) * i < count < (
                             self._threshold + self._error_threshold) * i:
-                        out_data.extend(repeat(bit, i))
-                self._buffered_data = self._buffered_data[count:]
+                        out_data = set_or_extend(out_data, bytearray(repeat(bit, i)))
+                self.info(f"Leading {bit} at offset {self._offset} of size {count}")
+                self._offset += count
+                del self._buffered_data[:count]
             return out_data
 
     class Encoder(Processor):
@@ -99,9 +113,11 @@ class OOK(object):
             self._threshold = sample_rate / symbol_rate
 
         def process(self, in_data):
-            out_data = bytearray()
-            for d in in_data:
-                out_data.extend(repeat(d, self._threshold))
+            out_data = None
+            if in_data is not None:
+                for d in in_data:
+                    out_data = set_or_extend(out_data, bytearray(repeat(d, self._threshold)))
+            return out_data
 
 
 class Manchester(object):
@@ -113,15 +129,21 @@ class Manchester(object):
     one_pulse = bytes([1, 0])
 
     class Encoder(Processor):
+        def __init__(self, initial, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._initial = initial or bytearray()
+
         def process(self, in_data):
-            out_data = bytearray()
-            for i in in_data:
-                if i == 0:
-                    out_data.extend(Manchester.zero_pulse)
-                elif i == 1:
-                    out_data.extend(Manchester.one_pulse)
-                else:
-                    self.error(f"Invalid value: {i}")
+            out_data = self._initial
+            self._initial = None
+            if in_data is not None:
+                for i in in_data:
+                    if i == 0:
+                        out_data = set_or_extend(out_data, bytearray(Manchester.zero_pulse))
+                    elif i == 1:
+                        out_data = set_or_extend(out_data, bytearray(Manchester.one_pulse))
+                    else:
+                        self.error(f"Invalid value: {i}")
             return out_data
 
     class Decoder(Processor):
@@ -130,17 +152,19 @@ class Manchester(object):
             self._buffered_data = bytearray()
 
         def process(self, in_data):
-            self._buffered_data.extend(in_data)
+            if in_data is not None:
+                self._buffered_data.extend(in_data)
 
-            out_data = bytearray()
+            out_data = None
             while len(self._buffered_data) > 1:
-                part = self._buffered_data[0:2]
+                part = self._buffered_data[:2]
                 if part == Manchester.zero_pulse:
-                    out_data.append(0)
+                    out_data = set_or_extend(out_data, bytearray([0]))
                 elif part == Manchester.one_pulse:
-                    out_data.append(1)
+                    out_data = set_or_extend(out_data, bytearray([1]))
                 else:
                     self.error(f"Invalid value: {part}")
+                del self._buffered_data[:2]
             return out_data
 
 
@@ -158,34 +182,38 @@ class BiphaseMark(object):
             self._flip = 1
 
         def process(self, in_data):
-            out_data = bytearray()
-            for i in in_data:
-                if i == 0:
-                    out_data.extend(BiphaseMark.zero_pulses[1 - self._flip])
-                    self._flip = out_data[-1]
-                elif i == 1:
-                    out_data.extend(BiphaseMark.one_pulses[1 - self._flip])
-                    self._flip = out_data[-1]
-                else:
-                    self.error(f"Invalid value: {i}")
+            out_data = None
+            if in_data is not None:
+                for i in in_data:
+                    if i == 0:
+                        out_data = set_or_extend(out_data, BiphaseMark.zero_pulses[1 - self._flip])
+                        self._flip = out_data[-1]
+                    elif i == 1:
+                        out_data = set_or_extend(out_data, BiphaseMark.one_pulses[1 - self._flip])
+                        self._flip = out_data[-1]
+                    else:
+                        self.error(f"Invalid value: {i}")
             return out_data
 
     class Decoder(Processor):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self._buffered_data = bytearray()
+            self._offset = 0
 
         def process(self, in_data):
-            self._buffered_data.extend(in_data)
+            if in_data is not None:
+                self._buffered_data.extend(in_data)
 
-            out_data = bytearray()
-            i = 0
-            for i in range(0, len(self._buffered_data), 2):
-                if self._buffered_data[i:i + 2] in BiphaseMark.zero_pulses:
-                    out_data.append(0)
-                elif self._buffered_data[i:i + 2] in BiphaseMark.one_pulses:
-                    out_data.append(1)
-            self._buffered_data = self._buffered_data[i:]
+            out_data = None
+            while len(self._buffered_data) >= 2:
+                if self._buffered_data[0:2] in BiphaseMark.zero_pulses:
+                    out_data = set_or_extend(out_data, bytearray([0]))
+                elif self._buffered_data[0:2] in BiphaseMark.one_pulses:
+                    out_data = set_or_extend(out_data, bytearray([1]))
+                self.info(f"Detect {out_data[-1]} at offset {self._offset}")
+                self._offset += 2
+                del self._buffered_data[:2]
             return out_data
 
 
@@ -229,17 +257,18 @@ class X2D(object):
             return out_data
 
         def process(self, in_data):
-            out_data = bytearray()
-            for d in in_data:
-                if not self._is_init:
-                    out_data.extend(repeat(0, self._preamble_0_count))
-                    out_data.extend(repeat(1, self._preamble_1_count))
-                    out_data.append(0)
-                    self._is_init = True
-                bitstream = bytes_to_bitstream(d, False)
-                out_data.extend(self.insert_0_after_successive_1(bitstream))
-                out_data.extend(self.insert_end_of_frame())
-                out_data.extend(self._separator)
+            out_data = None
+            if in_data is not None:
+                for d in in_data:
+                    if not self._is_init:
+                        out_data = set_or_extend(out_data, repeat(0, self._preamble_0_count))
+                        out_data = set_or_extend(out_data, repeat(1, self._preamble_1_count))
+                        out_data = set_or_extend(out_data, bytearray([0]))
+                        self._is_init = True
+                    bitstream = bytes_to_bitstream(d, False)
+                    out_data = set_or_extend(out_data, self.insert_0_after_successive_1(bitstream))
+                    out_data = set_or_extend(out_data, self.insert_end_of_frame())
+                    out_data = set_or_extend(out_data, self._separator)
             return out_data
 
     class Decoder(Processor):
@@ -256,6 +285,7 @@ class X2D(object):
             self._buffered_data = bytearray()
             self._state = self.State.INIT
             self._offset = 0
+            self._count_leading_cache = 0
 
         def strip_0_after_successive_1(self, data):
             count = 0
@@ -282,24 +312,26 @@ class X2D(object):
 
         def pop(self, count):
             self._offset += count
-            self._buffered_data = self._buffered_data[count:]
+            del self._buffered_data[:count]
 
         def process(self, in_data):
-            self._buffered_data.extend(in_data)
-            out_data = []
+            if in_data is not None:
+                self._buffered_data.extend(in_data)
+            out_data = None
             while True:
                 if self._state == self.State.INIT:
-                    v, count = _count_leading(self._buffered_data)
+                    v, count, self._count_leading_cache = _count_leading(self._buffered_data, offset=self._count_leading_cache)
                     if count <= 0:
                         # Not enough data
                         break
+
                     if count >= X2D.MIN_LEADING_ZEROS and v == 0:
                         self._state = self.State.LEAD_0
                     else:
                         self.info(f"Ignoring data at offset {self._offset} of size {count}")
                         self.pop(count)
                 elif self._state == self.State.LEAD_0:
-                    _, count = _count_leading(self._buffered_data, 0)
+                    _, count, self._count_leading_cache = _count_leading(self._buffered_data, 0, offset=self._count_leading_cache)
                     if count <= 0:
                         # Not enough data
                         break
@@ -314,7 +346,7 @@ class X2D(object):
                     self.pop(count)
                     self._state = self.State.LEAD_1
                 elif self._state == self.State.LEAD_1:
-                    _, count = _count_leading(self._buffered_data, 1)
+                    _, count, self._count_leading_cache = _count_leading(self._buffered_data, 1, offset=self._count_leading_cache)
                     if count <= 0:
                         # Not enough data
                         break
@@ -346,7 +378,7 @@ class X2D(object):
                     # Extract data
                     part = self._buffered_data[0:end]
                     frame_bitstream = self.strip_0_after_successive_1(part)
-                    out_data.append(bitstream_to_bytes(frame_bitstream, False))
+                    out_data = set_or_extend(out_data, [bitstream_to_bytes(frame_bitstream, False)])
 
                     # Update state
                     self.info(f"Data offset {self._offset} of size {end}")
