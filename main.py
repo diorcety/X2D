@@ -120,7 +120,7 @@ def get_messages_from_rflink_debug(in_data_1, check=False, context=None):
 
 with open("raw.bin", 'rb') as file:
     in_data_0 = bytearray(file.read())
-    msgs = segmentation(get_messages_from_raw, in_data_0, int(2000000/4820),  sample_rate=2000000, symbol_rate=4820)
+    msgs = get_messages_from_raw(in_data_0,  sample_rate=2000000, symbol_rate=4820, check=True)
     print_message("raw.bin", msgs)
 
 

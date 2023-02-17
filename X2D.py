@@ -173,8 +173,8 @@ class BiphaseMark(object):
     # ...| |__||_| |_||_...
     #    0  0  1  0   1
     #
-    zero_pulses = [bytearray([0, 0]), bytearray([1, 1])]
-    one_pulses = [bytearray([0, 1]), bytearray([1, 0])]
+    zero_pulses = [bytes([0, 0]), bytes([1, 1])]
+    one_pulses = [bytes([0, 1]), bytes([1, 0])]
 
     class Encoder(Processor):
         def __init__(self, *args, **kwargs):
@@ -186,10 +186,10 @@ class BiphaseMark(object):
             if in_data is not None:
                 for i in in_data:
                     if i == 0:
-                        out_data = set_or_extend(out_data, BiphaseMark.zero_pulses[1 - self._flip])
+                        out_data = set_or_extend(out_data, bytearray(BiphaseMark.zero_pulses[1 - self._flip]))
                         self._flip = out_data[-1]
                     elif i == 1:
-                        out_data = set_or_extend(out_data, BiphaseMark.one_pulses[1 - self._flip])
+                        out_data = set_or_extend(out_data, bytearray(BiphaseMark.one_pulses[1 - self._flip]))
                         self._flip = out_data[-1]
                     else:
                         self.error(f"Invalid value: {i}")
@@ -261,8 +261,8 @@ class X2D(object):
             if in_data is not None:
                 for d in in_data:
                     if not self._is_init:
-                        out_data = set_or_extend(out_data, repeat(0, self._preamble_0_count))
-                        out_data = set_or_extend(out_data, repeat(1, self._preamble_1_count))
+                        out_data = set_or_extend(out_data, bytearray(repeat(0, self._preamble_0_count)))
+                        out_data = set_or_extend(out_data, bytearray(repeat(1, self._preamble_1_count)))
                         out_data = set_or_extend(out_data, bytearray([0]))
                         self._is_init = True
                     bitstream = bytes_to_bitstream(d, False)
