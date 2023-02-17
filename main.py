@@ -1,6 +1,6 @@
 import random
-from X2D import Processor, OOK, BiphaseMark, Manchester, X2D, parse_x2d_message, format_x2d_message, bytes_to_bitstream, set_or_extend
-
+from encoding import Processor, OOK, BiphaseMark, Manchester, X2D, bytes_to_bitstream, set_or_extend
+from X2D import parse_x2d_message, format_x2d_message
 
 #
 # Helpers
@@ -122,7 +122,6 @@ with open("raw.bin", 'rb') as file:
     in_data_0 = bytearray(file.read())
     msgs = get_messages_from_raw(in_data_0,  sample_rate=2000000, symbol_rate=4820, check=True)
     print_message("raw.bin", msgs)
-
 
 with open("baud.bin") as file:
     data = bytearray([1 if a == '1' else 0 for a in file.read()])
