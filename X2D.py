@@ -31,6 +31,8 @@ class Device(IntEnum):
     Technical_Phone_Outage = 55
     Technical_Freezer_Outage = 56
 
+    USB_Key = 62
+
 
 class Family(IntEnum):
     Regulation = 1
