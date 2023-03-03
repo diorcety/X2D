@@ -123,6 +123,7 @@ TemperatureMessage = Struct(
     "temperature" / TemperatureAdapter(Int16ub)
 )
 
+
 #
 # Basic Command
 #
@@ -183,6 +184,11 @@ VariationCommandMessage = Struct(
 EnrollmentMessage = Struct(
     "rollingCode" / Int16ub
 )
+
+
+#
+# Functions
+#
 
 def x2d_crc(data):
     crc = 0

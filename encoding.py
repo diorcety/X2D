@@ -63,9 +63,9 @@ class Processor(object):
 
 class Bitstream(object):
     class Decoder(Processor):
-        def __init__(self, le=True, *args, **kwargs):
+        def __init__(self, be=True, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self._le = le
+            self._be = be
 
         def data(self, in_data):
             out_data = None
@@ -73,7 +73,7 @@ class Bitstream(object):
             idx = 0
             while idx < int(len(in_data)/8)*8:
                 d = in_data[idx] & 0x1
-                b = b << 1 | d << 0 if self._le else b >> 1 | d << 7
+                b = b << 1 | d << 0 if self._be else b >> 1 | d << 7
                 idx += 1
                 if idx % 8 == 0:
                     out_data = _set_or_extend(out_data, bytearray([b]))
@@ -82,9 +82,9 @@ class Bitstream(object):
             return idx, out_data, Processor.Status.CONTINUE
 
     class Encoder(Processor):
-        def __init__(self, le=True, *args, **kwargs):
+        def __init__(self, be=True, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self._le = le
+            self._be = be
 
         def data(self, in_data):
             out_data = None
@@ -93,7 +93,7 @@ class Bitstream(object):
                 d = in_data[idx]
                 b = bytearray()
                 for c in range(8):
-                    b.append((d >> ((7 - c) if self._le else c)) & 0x1)
+                    b.append((d >> ((7 - c) if self._be else c)) & 0x1)
                 out_data = _set_or_extend(out_data, b)
                 idx += 1
             return idx, out_data, Processor.Status.CONTINUE
@@ -103,7 +103,7 @@ class OOK(object):
     class Decoder(Processor):
         UNDEFINED = 2
 
-        def __init__(self, sample_rate, symbol_rate, error=0.25, *args, **kwargs):
+        def __init__(self, sample_rate, symbol_rate, error=0.3, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self._threshold = sample_rate / symbol_rate
             self._error_threshold = self._threshold * error
@@ -331,12 +331,12 @@ class X2D(object):
             s = Processor.Status.CONTINUE
             idx = 0
             while idx < len(in_data):
-                d = in_data[idx]
                 if not self._is_initialized:
                     out_data = _set_or_extend(out_data, bytearray(repeat(0, self._preamble_0_count)))
                     out_data = _set_or_extend(out_data, bytearray(repeat(1, self._preamble_1_count)))
                     out_data = _set_or_extend(out_data, bytearray([0]))
                     self._is_initialized = True
+                d = in_data[idx]
                 length, data, f = Bitstream.Encoder(False).process(d)
                 if length != len(d) or f != Processor.Status.CONTINUE:
                     self.info(f"Invalid data at offset {self._offset + idx}")
@@ -351,11 +351,10 @@ class X2D(object):
     class Decoder(Processor):
         class State(Enum):
             INIT = 0
-            LEAD_0 = 1
-            LEAD_1 = 2
-            EXTRA_0 = 3
-            DATA = 4
-            TRAILING = 5
+            LEAD_1 = 1
+            EXTRA_0 = 2
+            DATA = 3
+            TRAILING = 4
 
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
@@ -382,7 +381,9 @@ class X2D(object):
             return new_data
 
         @staticmethod
-        def count_leading(data, d=None, offset=0):
+        def count_leading(data):
+            d = None
+            offset = 0
             while offset < len(data):
                 if d is None:
                     d = data[offset]
@@ -417,34 +418,21 @@ class X2D(object):
                         break
 
                     if count >= X2D.MIN_LEADING_ZEROS and v == 0:
-                        self._state = self.State.LEAD_0
+                        self.info(f"Leading \"0\" at offset {self._offset + idx} of size {count}")
+                        idx += count
+                        self._state = self.State.LEAD_1
                     else:
                         self.info(f"Ignoring data at offset {self._offset + idx} of size {count}")
+                        idx += count
                         self._state = self.State.INIT
                         break
-                elif self._state == self.State.LEAD_0:
-                    _, count, _ = self.count_leading(in_data[idx:], 0)
-                    if count <= 0:
-                        # Not enough data
-                        break
-
-                    if count < X2D.MIN_LEADING_ZEROS:
-                        self.error(f"Invalid lead 0 size: {count}")
-                        s = Processor.Status.RESET
-                        self._state = self.State.INIT
-                        break
-
-                    # Update state
-                    self.info(f"Leading \"0\" at offset {self._offset + idx} of size {count}")
-                    idx += count
-                    self._state = self.State.LEAD_1
                 elif self._state == self.State.LEAD_1:
-                    _, count, _ = self.count_leading(in_data[idx:], 1)
+                    v, count, _ = self.count_leading(in_data[idx:])
                     if count <= 0:
                         # Not enough data
                         break
 
-                    if count < X2D.MIN_LEADING_ONES:
+                    if count < X2D.MIN_LEADING_ONES or v != 1:
                         self.error(f"Invalid lead 1 size: {count}")
                         s = Processor.Status.RESET
                         self._state = self.State.INIT
