@@ -1,5 +1,7 @@
 import random
+import X2D as x2d
 from encoding import Processor, OOK, BiphaseMark, Manchester, X2D, X2DMessage, Bitstream, process
+
 
 #
 # Helpers
@@ -51,7 +53,8 @@ class RFLinkDecoder(Processor):
 
 
 def get_messages_from_baud_processors():
-    return [BiphaseMark.Decoder(verbose=False), X2D.Decoder(verbose=False), X2DMessage.Decoder(verbose=False)]
+    return [BiphaseMark.Decoder(verbose=False), X2D.Decoder(verbose=False, throw=False),
+            X2DMessage.Decoder(verbose=False)]
 
 
 def get_messages_from_raw_processors(sample_rate, symbol_rate):
@@ -69,7 +72,37 @@ def get_messages_from_rflink_debug_processors():
 #
 # Process the data
 #
+"""
+with open("raw3.bin", 'rb') as file:
+    data = bytearray(file.read())
+    in_data_1 = process([OOK.Decoder(int(2000000 / 20), int(4820), verbose=False, throw=False)], data)
+    # in_data_2 = process([BiphaseMark.Decoder(verbose=False)], in_data_1)
+    # in_data_3 = process([X2D.Decoder(verbose=False, throw=False)], in_data_2)
+    # msgs = process([X2DMessage.Decoder(verbose=False)], in_data_3)
+    # print_message("raw.bin", msgs)
+    msgs = process(get_messages_from_raw_processors(int(2000000 / 20), int(4820)), data)
+    print_message("raw3.bin", msgs)
+"""
+"""
+with open("raw4.bin", 'rb') as file:
+    data = bytearray(file.read())
+    #in_data_1 = process([OOK.Decoder(int(2000000 / 20), int(4820), verbose=False, throw=False)], data)
+    #in_data_2 = process([BiphaseMark.Decoder(verbose=False)], in_data_1)
+    #in_data_3 = process([X2D.Decoder(verbose=True, throw=False)], in_data_2)
+    #msgs = process([X2DMessage.Decoder(verbose=True)], in_data_3)
+    #print_message("raw.bin", msgs)
+    msgs = process(get_messages_from_raw_processors(int(2000000 / 20), int(4820)), data)
+    print_message("raw4.bin", msgs)
 
+for d in [[0x33, 0x33, 0x2a, 0xab, 0x55, 0x2c, 0xcd, 0x2b, 0x53, 0x32, 0xb3, 0x33, 0x4b, 0x33, 0x34, 0xb2, 0xd2, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xd5, 0x52, 0xb4, 0xcd, 0x2a, 0xaa, 0xb5, 0x55]]:
+    in_data_1 = process([Bitstream.Encoder(True, verbose=False, throw=False)], d)
+    in_data_2 = process([BiphaseMark.Decoder(verbose=False)], in_data_1)
+    in_data_3 = process([X2D.Decoder(verbose=False, throw=False)], in_data_2)
+    msgs = process([X2DMessage.Decoder(verbose=False)], in_data_3)
+    print_message("raw.bin", msgs)
+    
+"""
+"""
 with open("raw.bin", 'rb') as file:
     in_data_0 = bytearray(file.read())
     in_data_1 = process([OOK.Decoder(2000000, 4820, verbose=False, throw=False)], in_data_0)
@@ -78,17 +111,30 @@ with open("raw.bin", 'rb') as file:
     msgs = process([X2DMessage.Decoder(verbose=False)], in_data_3)
     print_message("raw.bin", msgs)
     out_data_3 = process([X2DMessage.Encoder()], msgs)
+    # for m in out_data_3:
+    #    print(''.join('0x{:02x}, '.format(x) for x in m))
     out_data_2 = process([X2D.Encoder()], out_data_3)
     assert out_data_2[:len(in_data_2)] == in_data_2
     out_data_1 = process([BiphaseMark.Encoder()], out_data_2)
     assert out_data_1[:len(in_data_1)] == in_data_1
+    out_data_0 = process([Bitstream.Decoder(False, verbose=False)], out_data_1)
+    # print(''.join('0x{:02x}, '.format(x) for x in out_data_0))
+
+with open("raw2.bin", 'rb') as file:
+    in_data_0 = bytearray(file.read())
+    in_data_1 = process([OOK.Decoder(2000000, 4820, verbose=False, throw=False)], in_data_0)
+    in_data_1_1 = process([Bitstream.Decoder(False, verbose=False)], in_data_1)
+    # print(''.join('0x{:02x}, '.format(x) for x in in_data_1_1))
+    in_data_2 = process([BiphaseMark.Decoder(verbose=False)], in_data_1)
+    in_data_3 = process([X2D.Decoder(verbose=False)], in_data_2)
+    msgs = process([X2DMessage.Decoder(verbose=False)], in_data_3)
+    print_message("raw2.bin", msgs)
 
 with open("baud.bin") as file:
     data = bytearray([1 if a == '1' else 0 for a in file.read()])
     msgs = process(get_messages_from_baud_processors(), data, lambda x: random.randint(1, min(len(x), 64)))
     print_message("baud.bin", msgs)
-
-
+"""
 AssoArea3 = [0x55, 0x7f, 0x5d, 0xa4, 0xca, 0x95, 0x32, 0x52, 0x55, 0x3f, 0x27, 0xff, 0xc0]
 AssoArea2 = [0x55, 0x7f, 0x5d, 0xa4, 0xca, 0xD5, 0x32, 0x52, 0x55, 0x3f, 0x18, 0x00, 0x3f]
 AssoArea1 = [0x55, 0x7f, 0x5d, 0xa4, 0xca, 0xaa, 0xcd, 0xad, 0xaa, 0xc0, 0xc7, 0xff, 0xc0, 0x51, 0x2d, 0x9a, 0xaa, 0x99,
@@ -124,7 +170,7 @@ for name, data in [('OnArea1', OnArea1), ('OnArea3', OnArea3), ('OffArea3', OffA
                    ('MoonArea3', MoonArea3), ('AssoArea3', AssoArea3), ('MoonArea1', MoonArea1)]:
     msgs = process(get_messages_from_cc1101_manchester_processors(), data)
     print_message(name, msgs)
-
+"""
 # X2D;ID=0014881;SWITCH=12;CMD=ON;EXT=TYXIA;RC=2093;S=2281;BAT=OK;
 Pulse1 = [2550, 300, 330, 300, 330, 300, 330, 300, 330, 90, 120, 90, 120, 90, 120, 90, 120, 90, 120, 90, 120, 300, 120,
           90, 330, 300, 330, 300, 330, 300, 120, 90, 330, 300, 330, 90, 120, 300, 330, 90, 120, 300, 330, 120, 120, 300,
@@ -153,3 +199,87 @@ Pulse1 = [2550, 300, 330, 300, 330, 300, 330, 300, 330, 90, 120, 90, 120, 90, 12
 for name, data in [('Pulse1', Pulse1)]:
     msgs = process(get_messages_from_rflink_debug_processors(), data)
     print_message(name, msgs)
+"""
+data = [
+    # [0x2f, 0x68, 0x83, 0x02, 0x05, 0x98, 0x01, 0x00, 0x00, 0x00, 0x47, 0x05, 0xfd, 0xfa],
+    # [0x2f, 0x68, 0x83, 0x02, 0x05, 0x98, 0x01, 0x03, 0x00, 0x00, 0x0a, 0x09, 0xfe, 0x30],
+    # [0x2f, 0x68, 0x83, 0x01, 0x05, 0x98, 0x01, 0x03, 0x00, 0x00, 0x43, 0x05, 0xfd, 0xfc],
+    # [0x2f, 0x68, 0x83, 0x03, 0x05, 0x98, 0x01, 0x03, 0x00, 0x00, 0xac, 0x04, 0xfd, 0x92],
+    # [0x2f, 0x68, 0x83, 0x02, 0x05, 0x98, 0x01, 0x00, 0x00, 0x00, 0xad, 0x04, 0xfd, 0x95],
+    # [0x2f, 0x68, 0x83, 0x03, 0x05, 0x98, 0x01, 0x00, 0x00, 0x00, 0xd6, 0x08, 0xfd, 0x67],
+    # [0x2f, 0x68, 0x83, 0x03, 0x05, 0x98, 0x02, 0x04, 0x00, 0x00, 0x59, 0x09, 0xfd, 0xde],
+    # [0x2f, 0x68, 0x83, 0x00, 0x05, 0x98, 0xfe, 0x04, 0x01, 0x08, 0x01, 0x00, 0x00, 0xb7, 0x05, 0xfc, 0x81],
+    # [0x2f, 0x68, 0x83, 0x00, 0x05, 0x98, 0xfe, 0x04, 0x00, 0x24, 0x03, 0x00, 0x00, 0x1a, 0x09, 0xfc, 0xfd],
+    # [0x2f, 0x68, 0x83, 0x00, 0x05, 0x98, 0x0e, 0x03, 0x00, 0xb3, 0x7d, 0x00, 0x19, 0x6f, 0xfc, 0x80],
+    # [0x2f, 0x68, 0x83, 0x00, 0x05, 0x98, 0x11, 0x00, 0xfe, 0x05, 0xfd, 0x35],
+    # [0x2f, 0x68, 0x83, 0x00, 0x05, 0x98, 0x0a, 0x66, 0x25, 0xfd, 0x6e, 0xfc, 0x49],
+    [0x2f, 0x68, 0x83, 0x00, 0x05, 0x98, 0x0d, 0x00, 0x00, 0x00, 0x1e, 0xe7, 0x6e, 0xfc, 0xc9],
+    [0x2f, 0x68, 0x83, 0x00, 0x05, 0x98, 0x10, 0x15, 0x25, 0x20, 0x1f, 0xff, 0xff, 0xd4, 0x0e, 0xfa, 0xe0],
+    [0x2f, 0x68, 0x83, 0x00, 0x05, 0x98, 0x11, 0x00, 0xf5, 0x27, 0xfd, 0x1c],
+    [0x2f, 0x68, 0x83, 0x01, 0x05, 0x98, 0x1a, 0x70, 0x00, 0xfe, 0x6e, 0xfc, 0x52],
+    [0x2f, 0x68, 0x83, 0x02, 0x05, 0x98, 0x1a, 0x70, 0x00, 0x64, 0x0d, 0xfd, 0x4c],
+    [0x2f, 0x68, 0x83, 0x03, 0x05, 0x98, 0x1a, 0x70, 0x00, 0xde, 0x0e, 0xfc, 0xd0],
+    [0x2f, 0x68, 0x83, 0x00, 0x05, 0x98, 0x1b, 0x00, 0x80, 0xd5, 0x0e, 0xfc, 0xcb],
+    [0x2f, 0x68, 0x83, 0x00, 0x05, 0x98, 0x0e, 0x05, 0x00, 0x45, 0x35, 0x00, 0x06, 0x21, 0xfd, 0x95]
+]
+msgs = process([X2DMessage.Decoder(verbose=False)], data)
+print_message("data", msgs)
+
+"""
+House: 12136
+Source|Id: 2
+Source|Type: Calybox
+Recipient|Zone: 1
+Transmitter|Attribute: WithData
+Transmitter|BatteryFailing: false
+Transmitter|BoxOpened: false
+Transmitter|InternalFaultDetected: false
+Transmitter|EnrollmentRequested: false
+Control|AnswerRequested: false
+Data|Type: HeatingLevel
+HeatingLevel|FunctioningMode: Reduced
+HeatingLevel|Manual: false
+RollingCode: 62496
+"""
+
+d = {"house": 12136,
+     "source": {"id": 0, "type": x2d.Device.USB_Key},
+     "recipient": {"zone": 0},
+     "transmitter": {"attribute": x2d.Attribute.WithData},
+     "control": {"answer_request": True, "f7": True, "f4": True},
+     "data": {"value": {"type": x2d.MessageDataType.CurrentLevel}},
+     "rollingCode": None
+     }
+"""
+d = {"house": 12136,
+     "source": {"id": 0, "type": x2d.Device.USB_Key},
+     "recipient": {"zone": 1},
+     "transmitter": {"attribute": x2d.Attribute.WithData},
+     "control": {"answer_request": False, "f7": True, "f4": True},
+     "data": {"value": {"type": x2d.MessageDataType.HeatingLevel, "content": {"flags": {"manual": False, "mode": x2d.FunctioningMode.Confort}}}},
+     "rollingCode": None
+     }
+"""
+"""
+Data|Type: HeatingLevel
+HeatingLevel|FunctioningMode: Reduced
+HeatingLevel|Manual: false
+"""
+
+#
+"""
+d = {"house": 12136,
+     "source": {"id": 0, "type": x2d.Device.USB_Key},
+     "recipient": {"zone": 0},
+     "transmitter": {"attribute": x2d.Attribute.WithData, "enrollment_requested": True},
+     "control": {"answer_request": False, "f7": True, "f4": True},
+     "data": {"value": {"type": x2d.MessageDataType.Enrollment}},
+     "rollingCode": None
+     }
+"""
+
+# x = dict(width=3, height=2, pixels=[7, 8, 9, 11, 12, 13])
+msgs = process([X2DMessage.Encoder(verbose=False)], [d])
+for msg in msgs:
+    print(''.join('0x{:02x}, '.format(x) for x in msg))
+# msgs = process([X2DMessage.Decoder(verbose=False)], [d])

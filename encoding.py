@@ -99,6 +99,7 @@ class Bitstream(object):
             return idx, out_data, Processor.Status.CONTINUE
 
 
+
 class OOK(object):
     class Decoder(Processor):
         UNDEFINED = 2
@@ -133,8 +134,8 @@ class OOK(object):
                     self._count = 1
                     idx += 1
                 else:
-                    end = in_data.find(1 - self._bit, idx)
-                    if end >= 0:
+                    try:
+                        end = in_data.index(1 - self._bit, idx)
                         self._count += (end - idx)
                         idx += (end - idx)
                         d = self._bit
@@ -151,7 +152,7 @@ class OOK(object):
                             self.info(
                                 f"Pulse \"{d}\" at offset {self._offset + idx - self._count} of size {self._count}")
                             out_data = _set_or_extend(out_data, bytearray(repeat(d, width)))
-                    else:
+                    except ValueError:
                         end = len(in_data)
                         self._count += (end - idx)
                         idx += (end - idx)
@@ -425,7 +426,6 @@ class X2D(object):
                         self.info(f"Ignoring data at offset {self._offset + idx} of size {count}")
                         idx += count
                         self._state = self.State.INIT
-                        break
                 elif self._state == self.State.LEAD_1:
                     v, count, _ = self.count_leading(in_data[idx:])
                     if count <= 0:

@@ -1,3 +1,6 @@
+import construct.core
+import io
+
 from construct import *
 from enum import IntEnum
 
@@ -71,6 +74,7 @@ class MessageDataType(IntEnum):
     InternalTemperature = 10  # p Internal temperature command
     ExternalTemperature = 11  # o External temperature command
     MeterReading = 14  # bit[9] == 6 -> j(BasicMeterReading) else c (MeterReading)
+    CurrentLevel = 26
     BasicCommand = 33  # q BasicCommand
     VariationCommand = 34  # d VariationCommand
     ScenarioCommand = 35  # k Scenario
@@ -96,14 +100,15 @@ class FunctioningMode(IntEnum):
 
 FunctioningLevelMessage = Struct(
     "flags" / Bitwise(Struct(
-        "manual" / Flag,
-        "duration" / Flag,
-        "f5" / Flag,
-        "f4" / Flag,
+        "manual" / Default(Flag, False),
+        "duration" / Default(Flag, False),
+        "f5" / Default(Flag, False),
+        "f4" / Default(Flag, False),
         "mode" / Enum(BitsInteger(4), FunctioningMode)
     )),
-    "duration" / IfThenElse(this.flags.duration, Int16ub, Pass)
+    "duration" / Optional(Int16ub)
 )
+
 HeatingLevelMessage = FunctioningLevelMessage
 
 
@@ -120,7 +125,7 @@ class TemperatureAdapter(Adapter):
 
 
 TemperatureMessage = Struct(
-    "temperature" / TemperatureAdapter(Int16ub)
+    "temperature" / TemperatureAdapter(Int16ul)
 )
 
 
@@ -172,17 +177,62 @@ class VariationCommand(IntEnum):
 
 VariationCommandMessage = Struct(
     "command" / Enum(Int8ub, VariationCommand),
-    "dummy1" / Int8ub,
-    "dummy2" / Int8ub,
+    "dummy1" / Default(Int8ub, 0),
+    "dummy2" / Default(Int8ub, 0),
 )
-
 
 #
 # Enrollment
 #
 
 EnrollmentMessage = Struct(
-    "rollingCode" / Int16ub
+)
+
+
+#
+# Meter Reading Message
+#
+
+
+class ElectricityTariff(IntEnum):
+    Base = 0
+    EjpOffPeakDay = 32
+    EjpPeakDay = 33
+    DoubleOffPeakHour = 64
+    DoublePeakHour = 65
+    TempoBlueDayOffPeakHour = 96
+    TempoBlueDayPeakHour = 97
+    TempoWhiteDayOffPeakHour = 98
+    TempoWhiteDayPeakHour = 99
+    TempoRedDayOffPeakHour = 100
+    TempoRedDayPeakHour = 101
+
+
+class RegisterSelection(IntEnum):
+    CurrentTransformer1 = 0
+    CurrentTransformer2 = 1
+    CurrentTransformer3 = 2
+    Heating = 3
+    HotWater = 4
+    Total = 5
+    Cooling = 7
+    HeatingAndCooling = 8
+    ElectricityProduction = 9
+
+
+MeterReadingMessage = Struct(
+    "selection" / Enum(Int8ub, RegisterSelection),
+    "currentTariff" / Bitwise(Struct(
+        "f7" / Default(Flag, False),
+        "double" / Default(Flag, False),
+        "ejp" / Default(Flag, False),
+        "euro" / Default(Flag, False),
+        "f3" / Default(Flag, False),
+        "f2" / Default(Flag, False),
+        "f1" / Default(Flag, False),
+        "f0" / Default(Flag, False),
+    )),
+    "register" / BytesInteger(3, swapped=True)
 )
 
 
@@ -197,58 +247,109 @@ def x2d_crc(data):
     return int((~crc) + 1) & 0xFFFF
 
 
-def get_x2d_struct(data_length):
-    return Struct(
-        "body" / RawCopy(Struct(
-            "house" / Int16ub,
-            "source" / Bitwise(Struct(
-                "id" / BitsInteger(2),
-                "type" / Enum(BitsInteger(6), Device)
-            )),
-            "recipient" / Bitwise(Struct(
-                "f7" / Flag,
-                "f6" / Flag,
-                "f5" / Flag,
-                "f4" / Flag,
-                "sub_index" / BitsInteger(4)
-            )),
-            "transmitter" / Bitwise(Struct(
-                "enrollment_requested" / Flag,
-                "internal_fault_detected" / Flag,
-                "box_opened" / Flag,
-                "battery_failing" / Flag,
-                "attribute" / Enum(BitsInteger(4), Attribute)
-            )),
-            "control" / Bitwise(Struct(
-                "f7" / Flag,
-                "f6" / Flag,
-                "f5" / Flag,
-                "f4" / Flag,
-                "f3" / Flag,
-                "answer_request" / Flag,
-                "f1" / Flag,
-                "f0" / Flag
-            )),
-            "data" / Switch(lambda this: int(this.transmitter.attribute), {
-                Attribute.WithData: Struct(
-                    "type" / Enum(Int8ub, MessageDataType),
-                    "content" / Switch(lambda this: int(this.type), {
-                        MessageDataType.Enrollment: If(data_length - 2 > 0, EnrollmentMessage),
-                        MessageDataType.BasicCommand: BasicCommandMessage,
-                        MessageDataType.HeatingLevel: HeatingLevelMessage,
-                        MessageDataType.FunctioningLevel: FunctioningLevelMessage,
-                        MessageDataType.VariationCommand: VariationCommandMessage,
-                    }, default=Array(data_length - 1, Byte))
-                )
-            }, default=Array(data_length, Byte)),
+class OffsettedEnd(Subconstruct):
+    r"""
+    Parses all bytes in the stream till EOF plus endoffset is reached.
+
+    This is useful when GreedyBytes (or an other greedy construct) is followed by a fixed-size footer.
+
+    Parsing determines the length of the stream and reads all bytes till EOF plus `endoffset` is reached, then defers to subcon using new BytesIO with said bytes. Building defers to subcon as-is. Size is undefined.
+
+    :param endoffset: integer or context lambda, only negative offsets or 0 are allowed.
+    :param subcon: Construct instance
+
+    :raises StreamError: could not read enough bytes
+    :raises StreamError: reads behind the stream (if endoffset is positive)
+
+    Example::
+
+        >>> d = Struct("data"/OffsettedEnd(-2, GreedyBytes), "footer"/Bytes(2))
+        >>> d.parse(b"\x01\x02\x03\x04\x05")
+        Container(data=b'\x01\x02\x03', footer=b'\x04\x05')
+        >>> d.build(Container(data=b"\x01\x02\x03", footer=b"\x04\x05"))
+        b'\x01\x02\x03\x04\x05'
+    """
+
+    def __init__(self, endoffset, subcon):
+        super().__init__(subcon)
+        self.endoffset = endoffset
+
+    def _parse(self, stream, context, path):
+        endoffset = construct.core.evaluate(self.endoffset, context)
+        curpos = stream_tell(stream, path)
+        stream_seek(stream, 0, 2, path)
+        endpos = stream_tell(stream, path)
+        stream_seek(stream, curpos, 0, path)
+        length = endpos + endoffset - curpos
+        data = stream_read(stream, length, path)
+        if self.subcon is GreedyBytes:
+            return data
+        if type(self.subcon) is GreedyString:
+            return data.decode(self.subcon.encoding)
+        return self.subcon._parsereport(io.BytesIO(data), context, path)
+
+    def _build(self, obj, stream, context, path):
+        return self.subcon._build(obj, stream, context, path)
+
+
+def _offset(context):
+    return -2 if context.control.rolling_code else -0
+
+_x2d_struct = Struct(
+    "body" / OffsettedEnd(-2, RawCopy(Struct(
+        "house" / Int16ub,
+        "source" / Bitwise(Struct(
+            "id" / BitsInteger(2),
+            "type" / Enum(BitsInteger(6), Device)
         )),
-        "checksum" / Checksum(Int16ub, x2d_crc, this.body.data)
-    )
+        "recipient" / Bitwise(Struct(
+            "f7" / Default(Flag, False),
+            "f6" / Default(Flag, False),
+            "f5" / Default(Flag, False),
+            "f4" / Default(Flag, False),
+            "zone" / BitsInteger(4)
+        )),
+        "transmitter" / Bitwise(Struct(
+            "enrollment_requested" / Default(Flag, False),
+            "internal_fault_detected" / Default(Flag, False),
+            "box_opened" / Default(Flag, False),
+            "battery_failing" / Default(Flag, False),
+            "attribute" / Enum(BitsInteger(4), Attribute)
+        )),
+        "control" / Bitwise(Struct(
+            "f7" / Default(Flag, False),
+            "f6" / Default(Flag, False),
+            "f5" / Default(Flag, False),
+            "f4" / Default(Flag, False),
+            "rolling_code" / Default(Flag, False),
+            "answer_request" / Default(Flag, False),
+            "f1" / Default(Flag, False),
+            "f0" / Default(Flag, False)
+        )),
+        "data" / OffsettedEnd(_offset, RawCopy(Switch(lambda this: int(this.transmitter.attribute), {
+            Attribute.WithData: Struct(
+                "type" / Enum(Int8ub, MessageDataType),
+                "content" / Optional(Switch(lambda this: int(this.type), {
+                    MessageDataType.Enrollment: EnrollmentMessage,
+                    MessageDataType.BasicCommand: BasicCommandMessage,
+                    MessageDataType.HeatingLevel: HeatingLevelMessage,
+                    MessageDataType.FunctioningLevel: FunctioningLevelMessage,
+                    MessageDataType.VariationCommand: VariationCommandMessage,
+                    MessageDataType.InternalTemperature: TemperatureMessage,
+                    MessageDataType.MeterReading: MeterReadingMessage,
+                    MessageDataType.CurrentLevel: HeatingLevelMessage,
+                }, default=GreedyBytes))
+            )
+        }))),
+        "rollingCode" / If(this.control.rolling_code, Int16ub),
+    ))),
+    "checksum" / Checksum(Int16ub, x2d_crc, this.body.data)
+)
 
 
 def parse_x2d_message(data):
-    return get_x2d_struct(len(data) - 8).parse(bytearray(data)).body.value
+    return _x2d_struct.parse(bytearray(data)).body.value
 
 
 def format_x2d_message(msg):
-    return get_x2d_struct(len(msg.data)).build(dict(body=dict(value=msg)))
+    return _x2d_struct.build(dict(body=dict(value=msg)))
