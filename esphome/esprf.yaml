@@ -1,0 +1,391 @@
+esphome:
+  name: esprf
+  includes:
+    - encoding.h
+    - encoding.c
+    - x2d_encoding.h
+    - x2d_encoding.c
+    - struct.h
+    - x2d.h
+    - x2d.c
+    - x2d_entity.h
+    - x2d_entity.cpp
+    - x2d_sensor.h
+    - x2d_sensor.cpp
+    - x2d_actuator.h
+    - x2d_actuator.cpp
+    - cc1101_x2d.h
+    - cc1101_x2d.cpp
+    - log.cpp
+  libraries:
+    - SPI
+    - RadioLib
+
+spi:
+  clk_pin: GPIO14
+  miso_pin: GPIO12
+  mosi_pin: GPIO13
+
+esp8266:
+  board: d1_mini
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  password: !secret api_password
+  reboot_timeout: 0s
+
+ota:
+  password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "EspRF Fallback Hotspot"
+    password: !secret ap_password
+
+captive_portal:
+
+web_server:
+    port: 80
+    auth:
+        username: admin
+        password: !secret web_server_password
+
+custom_component:
+  - lambda: |-
+      auto x2d = new CC1101_X2D(
+        D8, // CSN
+        D2, // GDO0
+        D1 // GDO2
+      );
+      auto x2d_zone1_actuator = new X2DHeatingLevelActuator(x2d, 12136, 1);
+      auto x2d_zone2_actuator = new X2DHeatingLevelActuator(x2d, 12136, 2);
+      auto x2d_zone3_actuator = new X2DHeatingLevelActuator(x2d, 12136, 3);
+      return {x2d, x2d_zone1_actuator, x2d_zone2_actuator, x2d_zone3_actuator};
+    components:
+      - id: cc1101_x2d
+      - id: zone1LevelActuator
+      - id: zone2LevelActuator
+      - id: zone3LevelActuator
+
+text_sensor:
+- platform: custom
+  lambda: |-
+    auto zone1LevelSensor = new X2DZoneLevelSensor((CC1101_X2D*)cc1101_x2d, 12136, 1);
+    App.register_component(zone1LevelSensor);
+    auto zone2LevelSensor = new X2DZoneLevelSensor((CC1101_X2D*)cc1101_x2d, 12136, 2);
+    App.register_component(zone2LevelSensor);
+    auto zone3LevelSensor = new X2DZoneLevelSensor((CC1101_X2D*)cc1101_x2d, 12136, 3);
+    App.register_component(zone3LevelSensor);
+    return {zone1LevelSensor, zone2LevelSensor, zone3LevelSensor};
+
+  text_sensors:
+  - id: zone1LevelSensor
+    name: Status Zone 1
+  - id: zone2LevelSensor
+    name: Status Zone 2
+  - id: zone3LevelSensor
+    name: Status Zone 3
+
+select:
+  - platform: template
+    id: zone1LevelOrder
+    name: "Order Zone 1"
+    optimistic: true
+    options:
+      - None
+      - Reduced
+      - Moderato
+      - Medio
+      - Confort
+      - Stop
+      - AntiFrost
+      - Special
+      - Auto
+      - Centralized
+    on_value:
+      then:
+        - script.execute: update_zone1
+  - platform: template
+    id: zone2LevelOrder
+    name: "Order Zone 2"
+    optimistic: true
+    options:
+      - None
+      - Reduced
+      - Moderato
+      - Medio
+      - Confort
+      - Stop
+      - AntiFrost
+      - Special
+      - Auto
+      - Centralized
+    on_value:
+      then:
+        - script.execute: update_zone2
+  - platform: template
+    id: zone3LevelOrder
+    name: "Order Zone 3"
+    optimistic: true
+    options:
+      - None
+      - Reduced
+      - Moderato
+      - Medio
+      - Confort
+      - Stop
+      - AntiFrost
+      - Special
+      - Auto
+      - Centralized
+    on_value:
+      then:
+        - script.execute: update_zone3
+
+
+script:
+  - id: update_zone1
+    then:
+      - logger.log:
+          format: "Order Zone 1: %s"
+          args: ["id(zone1LevelOrder).state.c_str()"]
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone1LevelOrder).state.c_str(), "None") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone1LevelActuator).setNone();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone1LevelOrder).state.c_str(), "Reduced") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone1LevelActuator).setReduced();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone1LevelOrder).state.c_str(), "Moderato") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone1LevelActuator).setModerato();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone1LevelOrder).state.c_str(), "Medio") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone1LevelActuator).setMedio();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone1LevelOrder).state.c_str(), "Confort") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone1LevelActuator).setConfort();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone1LevelOrder).state.c_str(), "Stop") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone1LevelActuator).setStop();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone1LevelOrder).state.c_str(), "AntiFrost") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone1LevelActuator).setAntiFrost();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone1LevelOrder).state.c_str(), "Special") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone1LevelActuator).setSpecial();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone1LevelOrder).state.c_str(), "Auto") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone1LevelActuator).setAuto();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone1LevelOrder).state.c_str(), "Centralized") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone1LevelActuator).setCentralized();
+  - id: update_zone2
+    then:
+      - logger.log:
+          format: "Order Zone 2: %s"
+          args: ["id(zone2LevelOrder).state.c_str()"]
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone2LevelOrder).state.c_str(), "None") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone2LevelActuator).setNone();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone2LevelOrder).state.c_str(), "Reduced") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone2LevelActuator).setReduced();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone2LevelOrder).state.c_str(), "Moderato") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone2LevelActuator).setModerato();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone2LevelOrder).state.c_str(), "Medio") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone2LevelActuator).setMedio();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone2LevelOrder).state.c_str(), "Confort") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone2LevelActuator).setConfort();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone2LevelOrder).state.c_str(), "Stop") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone2LevelActuator).setStop();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone2LevelOrder).state.c_str(), "AntiFrost") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone2LevelActuator).setAntiFrost();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone2LevelOrder).state.c_str(), "Special") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone2LevelActuator).setSpecial();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone2LevelOrder).state.c_str(), "Auto") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone2LevelActuator).setAuto();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone2LevelOrder).state.c_str(), "Centralized") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone2LevelActuator).setCentralized();
+  - id: update_zone3
+    then:
+      - logger.log:
+          format: "Order Zone 3: %s"
+          args: ["id(zone3LevelOrder).state.c_str()"]
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone3LevelOrder).state.c_str(), "None") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone3LevelActuator).setNone();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone3LevelOrder).state.c_str(), "Reduced") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone3LevelActuator).setReduced();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone3LevelOrder).state.c_str(), "Moderato") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone3LevelActuator).setModerato();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone3LevelOrder).state.c_str(), "Medio") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone3LevelActuator).setMedio();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone3LevelOrder).state.c_str(), "Confort") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone3LevelActuator).setConfort();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone3LevelOrder).state.c_str(), "Stop") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone3LevelActuator).setStop();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone3LevelOrder).state.c_str(), "AntiFrost") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone3LevelActuator).setAntiFrost();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone3LevelOrder).state.c_str(), "Special") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone3LevelActuator).setSpecial();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone3LevelOrder).state.c_str(), "Auto") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone3LevelActuator).setAuto();
+      - if:
+          condition:
+            - lambda: |-
+                return (strcmp(id(zone3LevelOrder).state.c_str(), "Centralized") == 0);
+          then:
+            lambda: |-
+              get_x2d_heating_level_actuator(zone3LevelActuator).setCentralized();
+button:
+  - platform: template
+    name: Associate Zone 1
+    on_press:
+      - lambda: get_x2d_heating_level_actuator(zone1LevelActuator).associate();
+  - platform: template
+    name: Associate Zone 2
+    on_press:
+      - lambda: get_x2d_heating_level_actuator(zone2LevelActuator).associate();
+  - platform: template
+    name: Associate Zone 3
+    on_press:
+      - lambda: get_x2d_heating_level_actuator(zone3LevelActuator).associate();
