@@ -14,6 +14,8 @@ esphome:
     - x2d_sensor.cpp
     - x2d_actuator.h
     - x2d_actuator.cpp
+    - cc1101_gate.h
+    - cc1101_gate.cpp
     - cc1101_x2d.h
     - cc1101_x2d.cpp
     - log.cpp
@@ -59,6 +61,11 @@ web_server:
 
 custom_component:
   - lambda: |-
+      //auto gate = new CC1101_Gate(
+      //  D8, // CSN
+      //  D2, // GDO0
+      //  D1 // GDO2
+      //);
       auto x2d = new CC1101_X2D(
         D8, // CSN
         D2, // GDO0
@@ -69,6 +76,7 @@ custom_component:
       auto x2d_zone3_actuator = new X2DHeatingLevelActuator(x2d, 12136, 3);
       return {x2d, x2d_zone1_actuator, x2d_zone2_actuator, x2d_zone3_actuator};
     components:
+      #- id: cc1101_gate
       - id: cc1101_x2d
       - id: zone1LevelActuator
       - id: zone2LevelActuator
@@ -389,3 +397,7 @@ button:
     name: Associate Zone 3
     on_press:
       - lambda: get_x2d_heating_level_actuator(zone3LevelActuator).associate();
+  #- platform: template
+  #  name: Gate
+  #  on_press:
+  #    - lambda: get_cc1101_gate(cc1101_gate).transmit("011110111111101110100", 4, 4);

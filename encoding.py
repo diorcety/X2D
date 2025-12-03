@@ -20,6 +20,7 @@ def _set_or_extend(current, to_add):
 class Processor(object):
     class Status(Enum):
         CONTINUE = 0xAABBCCDD
+        OUT_OF_DATA = 0xBADCAFE
         RESET = 0xDEADBEEF
 
     def __init__(self, throw=True, verbose=False):
@@ -47,7 +48,7 @@ class Processor(object):
         in_data = _set_or_extend(self._buffered_data, value)
         consumed, out_data, s = self.data(in_data)
         self._offset += consumed
-        if s == Processor.Status.CONTINUE:
+        if s != Processor.Status.RESET:
             self._buffered_data = in_data[consumed:]
             consumed = len(value)
         return consumed, out_data, s
@@ -71,7 +72,7 @@ class Bitstream(object):
             out_data = None
             b = 0
             idx = 0
-            while idx < int(len(in_data)/8)*8:
+            while idx < int(len(in_data) / 8) * 8:
                 d = in_data[idx] & 0x1
                 b = b << 1 | d << 0 if self._be else b >> 1 | d << 7
                 idx += 1
@@ -99,7 +100,6 @@ class Bitstream(object):
             return idx, out_data, Processor.Status.CONTINUE
 
 
-
 class OOK(object):
     class Decoder(Processor):
         UNDEFINED = 2
@@ -115,6 +115,7 @@ class OOK(object):
         def reset(self):
             super().reset()
             self._bit = self.UNDEFINED
+            self._count = None
 
         def find_pulse_width(self, count):
             for i in range(1, 3):
@@ -153,9 +154,7 @@ class OOK(object):
                                 f"Pulse \"{d}\" at offset {self._offset + idx - self._count} of size {self._count}")
                             out_data = _set_or_extend(out_data, bytearray(repeat(d, width)))
                     except ValueError:
-                        end = len(in_data)
-                        self._count += (end - idx)
-                        idx += (end - idx)
+                        s = Processor.Status.OUT_OF_DATA
             return idx, out_data, s
 
     class Encoder(Processor):
@@ -286,6 +285,237 @@ class BiphaseMark(object):
                     out_data = _set_or_extend(out_data, bytearray([1]))
                 self.info(f"Detect \"{out_data[-1]}\" at offset {self._offset + idx}")
                 idx += 2
+            return idx, out_data, Processor.Status.CONTINUE
+
+
+class Packetizer(object):
+    class Decoder(Processor):
+        UNDEFINED = 2
+
+        def __init__(self, sample_rate, symbol_rate, silent_length=10, preamble=None, syncword=None, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._bit_count = sample_rate // symbol_rate
+            self._silent_count = int(self._bit_count * silent_length)
+            self._preamble = preamble
+            self._syncword = syncword
+            self._bit = None
+            self._count = None
+            self._current = None
+            self.reset()
+
+        def reset(self):
+            super().reset()
+            self._bit = self.UNDEFINED
+            self._current = None
+            self._count = None
+
+        def data(self, in_data):
+            out_data = None
+            idx = 0
+            s = Processor.Status.CONTINUE
+            while idx < len(in_data) and s == Processor.Status.CONTINUE:
+                d = in_data[idx]
+                if self._bit == self.UNDEFINED:
+                    self._bit = d
+                    self._count = 1
+                    idx += 1
+                else:
+                    try:
+                        end = in_data.index(1 - self._bit, idx)
+                    except ValueError:
+                        end = len(in_data)
+                    self._count += (end - idx)
+                    if self._count >= self._silent_count:
+                        idx += (end - idx)
+                        # Detect silent only if there is data
+                        if end != len(in_data) or self._current is not None:
+                            d = self._bit
+                            self._bit = self.UNDEFINED
+
+                            self.info(
+                                f"Silent detected \"{d}\" at offset {self._offset + idx - self._count} of size {self._count}")
+
+                        if self._current is not None:
+                            forward = True
+                            
+                            # Add missing bits from the silent in order to have a full byte
+                            extend_length = ((((len(self._current) - 1) // 8) + 1) * 8) - len(self._current)
+                            _set_or_extend(self._current, bytearray(repeat(d, extend_length)))
+
+                            # Decode the bitstream (array of bits to array of bytes)
+                            length, data, f = Bitstream.Decoder(True).process(self._current)
+
+                            # Preamble ?
+                            if forward and self._preamble is not None:
+                                preamble = data[0:len(self._preamble)]
+                                if preamble != self._preamble:
+                                    forward = False
+                                    self.info(
+                                        f"Preamble \"{preamble}\" doesn't match \"{self._preamble}\" exclude the packet")
+                                else:
+                                    data = data[len(self._preamble):]
+
+                            # Syncword ?
+                            if forward and self._syncword is not None:
+                                syncword = data[0:len(self._syncword)]
+                                if syncword != self._syncword:
+                                    forward = False
+                                    self.info(
+                                        f"Syncword \"{syncword}\" doesn't match \"{self._syncword}\" exclude the packet")
+                                else:
+                                    data = data[len(self._syncword):]
+
+                            # Data?
+                            if forward:
+                                self.info(f"New packet")
+                                out_data = _set_or_extend(out_data, [data])
+                            self._current = None
+                    else:
+                        # Only handle the data if this not the end of the data
+                        if end != len(in_data):
+                            idx += (end - idx)
+                            d = self._bit
+                            self._bit = self.UNDEFINED
+
+                            width = round(self._count / self._bit_count)
+                            if width < 1:
+                                self.info(
+                                    f"Glitch \"{d}\" at offset {self._offset + idx - self._count} of size {self._count}")
+                            else:
+                                self.info(
+                                    f"Pulse \"{d}\" at offset {self._offset + idx - self._count} of size {self._count} ({width} symbols)")
+                                self._current = _set_or_extend(self._current, bytearray(repeat(d, width)))
+                        else:
+                            # Keep the data for the next round
+                            self._count -= (end - idx)
+                            s = Processor.Status.OUT_OF_DATA
+
+            return idx, out_data, s
+
+    class Encoder(Processor):
+        def __init__(self, sample_rate, symbol_rate, silent_length=10, preamble=None, syncword=None, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._bit_count = sample_rate // symbol_rate
+            self._silent_count = int(self._bit_count * silent_length)
+            self._preamble = preamble
+            self._syncword = syncword
+            self.reset()
+
+        @classmethod
+        def repeat_bits(cls, out_data, data, count):
+            for b in data:
+                out_data = _set_or_extend(out_data, bytearray(repeat(b, count)))
+            return out_data
+
+        def data(self, in_data):
+            out_data = None
+            idx = 0
+            while idx < len(in_data):
+                d = in_data[idx]
+
+                # Encode to bitstream (array of bytes to array of bits)
+                length, data, f = Bitstream.Encoder(True).process(d)
+
+                # Silent
+                out_data = self.repeat_bits(out_data, [0], self._silent_count)
+
+                # Preamble
+                if self._preamble is not None:
+                    preamble_length, preamble_data, preamble_f = Bitstream.Encoder(True).process(self._preamble)
+                    out_data = self.repeat_bits(out_data, preamble_data, self._bit_count)
+
+                # Syncword ?
+                if self._syncword is not None:
+                    syncword_length, syncword_data, syncword_f = Bitstream.Encoder(True).process(self._syncword)
+                    out_data = self.repeat_bits(out_data, syncword_data, self._bit_count)
+
+                out_data = self.repeat_bits(out_data, data, self._bit_count)
+
+                # Silent
+                out_data = self.repeat_bits(out_data, [0], self._silent_count)
+
+                idx += 1
+            return idx, out_data, Processor.Status.CONTINUE
+
+
+class CcittWhitening(object):
+    @classmethod
+    def reverse_bits(cls, x):
+        x = ((x & 0xF0) >> 4) | ((x & 0x0F) << 4)
+        x = ((x & 0xCC) >> 2) | ((x & 0x33) << 2)
+        x = ((x & 0xAA) >> 1) | ((x & 0x55) << 1)
+        return x
+
+    @classmethod
+    def ccitt_whitening_cstyle(cls, data):
+        key_msb = 0x01
+        key_lsb = 0xFF
+        out = bytearray(data)
+
+        for i in range(len(out)):
+            whitening_byte = cls.reverse_bits(key_lsb)
+            out[i] ^= whitening_byte
+
+            for _ in range(8):
+                key_msb_prev = key_msb
+                key_msb = (key_lsb & 0x01) ^ ((key_lsb >> 5) & 1)
+                key_lsb = ((key_msb_prev << 7) & 0x80) | ((key_lsb >> 1) & 0xFF)
+
+        return bytes(out)
+
+    class Decoder(Processor):
+        def data(self, in_data):
+            out_data = []
+            idx = 0
+            while idx < len(in_data):
+                m = in_data[idx]
+                out_data.append(CcittWhitening.ccitt_whitening_cstyle(m))
+                idx += 1
+            return idx, out_data, Processor.Status.CONTINUE
+
+    class Encoder(Processor):
+        def data(self, in_data):
+            out_data = []
+            idx = 0
+            while idx < len(in_data):
+                m = in_data[idx]
+                out_data.append(CcittWhitening.ccitt_whitening_cstyle(m))
+                idx += 1
+            return idx, out_data, Processor.Status.CONTINUE
+
+
+class Duplicator(object):
+    class Decoder(Processor):
+        def __init__(self):
+            super().__init__()
+            self._previous = None
+
+        def reset(self):
+            self._previous = None
+
+        def data(self, in_data):
+            out_data = []
+            idx = 0
+            while idx < len(in_data):
+                m = in_data[idx]
+                if m != self._previous:
+                    out_data.append(m)
+                self._previous = m
+                idx += 1
+            return idx, out_data, Processor.Status.CONTINUE
+
+    class Encoder(Processor):
+        def __init__(self, duplicate_count=5):
+            super().__init__()
+            self._duplicate_count = duplicate_count
+
+        def data(self, in_data):
+            out_data = []
+            idx = 0
+            while idx < len(in_data):
+                m = in_data[idx]
+                out_data = _set_or_extend(out_data, repeat(self._duplicate_count, m))
+                idx += 1
             return idx, out_data, Processor.Status.CONTINUE
 
 
@@ -498,7 +728,10 @@ class X2DMessage(object):
             idx = 0
             while idx < len(in_data):
                 m = in_data[idx]
-                out_data.append(parse_x2d_message(m))
+                try:
+                    out_data.append(parse_x2d_message(m))
+                except BaseException as e:
+                    self.error(f"Can't parse X2D message: {e}")
                 idx += 1
             return idx, out_data, Processor.Status.CONTINUE
 
@@ -510,6 +743,33 @@ class X2DMessage(object):
             while idx < len(in_data):
                 m = in_data[idx]
                 out_data.append(format_x2d_message(m))
+                idx += 1
+            return idx, out_data, Processor.Status.CONTINUE
+
+
+class X3DMessage(object):
+    class Decoder(Processor):
+        def data(self, in_data):
+            from X3D import parse_x3d_message
+            out_data = []
+            idx = 0
+            while idx < len(in_data):
+                m = in_data[idx]
+                try:
+                    out_data.append(parse_x3d_message(m))
+                except BaseException as e:
+                    self.error(f"Can't parse X2D message: {e}")
+                idx += 1
+            return idx, out_data, Processor.Status.CONTINUE
+
+    class Encoder(Processor):
+        def data(self, in_data):
+            from X3D import format_x3d_message
+            out_data = []
+            idx = 0
+            while idx < len(in_data):
+                m = in_data[idx]
+                out_data.append(format_x3d_message(m))
                 idx += 1
             return idx, out_data, Processor.Status.CONTINUE
 

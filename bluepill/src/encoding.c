@@ -155,6 +155,64 @@ PROCESS_RESULT biphase_mark_encoder_process(biphase_mark_encoder_state_t *state,
     return PROCESS_RESULT_OK;
 }
 
+// from https://github.com/mr-sven/rtl_433/blob/master/src/bit_util.c#L403
+static uint8_t ccitt_whitening(uint8_t *key_msb, uint8_t *key_lsb, uint8_t byte)
+{
+    uint8_t key_msb_previous;
+    uint8_t reflected_key_lsb;
+
+    reflected_key_lsb = (*key_lsb & 0xf0) >> 4 | (*key_lsb & 0x0f) << 4;
+    reflected_key_lsb = (reflected_key_lsb & 0xcc) >> 2 | (reflected_key_lsb & 0x33) << 2;
+    reflected_key_lsb = (reflected_key_lsb & 0xaa) >> 1 | (reflected_key_lsb & 0x55) << 1;
+
+    uint8_t result = byte ^ reflected_key_lsb;
+
+    for (uint8_t rol_counter = 0; rol_counter < 8; rol_counter++)
+    {
+        key_msb_previous = *key_msb;
+        *key_msb = (*key_lsb & 0x01) ^ ((*key_lsb >> 5) & 0x01);
+        *key_lsb = ((key_msb_previous << 7) & 0x80) | ((*key_lsb >> 1) & 0xff);
+    }
+
+    return result;
+}
+
+bool ccitt_whitening_decoder_reset(ccitt_whitening_decoder_state_t *state)
+{
+    state->key_msb = 0x01;
+    state->key_lsb = 0xff;
+    return true;
+}
+
+PROCESS_RESULT ccitt_whitening_decoder_process(ccitt_whitening_decoder_state_t *state, buffer_t *in_data, buffer_t *out_data)
+{
+    ASSERT_IN_TYPE(in_data->type == buffer_type_byte);
+    ASSERT_IN_TYPE(out_data->type == buffer_type_byte);
+    size_t in_index = 0;
+    size_t out_index = 0;
+    ASSERT_IN_AVAIL(in_data, in_index, 1);
+    ASSERT_OUT_SPACE(out_data, out_index, 1);
+    do
+    {
+        _set_free_buffer_index(out_data, out_index, ccitt_whitening(&state->key_msb, &state->key_lsb, _get_used_buffer_index(in_data, in_index)));
+        in_index += 1;
+        out_index += 1;
+    } while (_buffer_have_n_available(in_data, in_index, 1) && _buffer_have_n_space(out_data, out_index, 1));
+    _buffer_consume(in_data, in_index);
+    _buffer_apply(out_data, out_index);
+    return PROCESS_RESULT_OK;
+}
+
+bool ccitt_whitening_encoder_reset(ccitt_whitening_encoder_state_t *state)
+{
+    return ccitt_whitening_decoder_reset(state);
+}
+
+PROCESS_RESULT ccitt_whitening_encoder_process(ccitt_whitening_encoder_state_t *state, buffer_t *in_data, buffer_t *out_data)
+{
+    return ccitt_whitening_decoder_process(state, in_data, out_data);
+}
+
 bool buffer_transcoder_reset(buffer_transcoder_state_t *state)
 {
     return true;
@@ -229,14 +287,12 @@ PROCESS_RESULT buffer_transcoder_process(buffer_transcoder_state_t *state, buffe
 #define x2d_frame_MIN_LEADING_ZEROS 7
 #define x2d_frame_MIN_LEADING_ONES 6
 #define x2d_frame_MAX_SUCCESSIVE_ONES 5
-#define x2d_frame_END_OF_FRAME    \
-    {                             \
-        1, 1, 1, 1, 1, 1, 1, 1, 0 \
-    }
+#define x2d_frame_END_OF_FRAME \
+    {                          \
+        1, 1, 1, 1, 1, 1, 1, 1, 0}
 #define x2d_frame_SEPARATOR \
     {                       \
-        1, 1, 1, 1, 1, 1, 0 \
-    }
+        1, 1, 1, 1, 1, 1, 0}
 #define x2d_frame_TRAILING_LENGTH 7
 #define x2d_frame_EXTRA_0_LENGTH 1
 #define x2d_frame_MAX_BIT_LENGTH 16 * 8
