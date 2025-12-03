@@ -8,10 +8,9 @@ extern int arduino_printf(const char *__restrict, ...);
 #define PRINT_FCT(...) printf(__VA_ARGS__)
 #endif
 
-#define VNS(x, y)   \
-    {               \
-        x##_##y, #y \
-    }
+#define VNS(x, y) \
+    {             \
+        x##_##y, #y}
 #define ARRAY_SIZE(T) (sizeof(T) / sizeof(T[0]))
 
 static struct

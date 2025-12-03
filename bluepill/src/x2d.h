@@ -202,12 +202,12 @@ TYPEDEF_PACKED_STRUCT_END(X2D_FOOTER)
 
 // clang-format on
 #ifdef __cplusplus
-                                                                                    extern "C"
+                                                                                 extern "C"
 {
 #endif
-    void x2d_print(uint8_t * data, size_t size);
-    size_t x2d_get_frame_size(uint8_t * data, size_t size);
-    uint16_t x2d_compute_checksum(uint8_t * data, size_t size);
+    void x2d_print(uint8_t *data, size_t size);
+    size_t x2d_get_frame_size(uint8_t *data, size_t size);
+    uint16_t x2d_compute_checksum(uint8_t *data, size_t size);
 #ifdef __cplusplus
 }
 #endif

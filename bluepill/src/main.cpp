@@ -1,8 +1,19 @@
 #include <Arduino.h>
 #include <RadioLib.h>
+
+#define X3D_APP
+
+#ifdef X2D_APP
 #include "x2d.h"
 #include "x2d_encoding.h"
+#endif
+#ifdef X3D_APP
+#include "x3d.h"
+#include "x3d_app.h"
+#include "encoding.h"
+#endif
 
+// Change LED
 #ifdef LED_BUILTIN
 #undef LED_BUILTIN
 #endif
@@ -15,31 +26,35 @@
 #define GDO0 PA0
 #define GDO2 PA1
 
-#define RX
+#define WITH_TX
 #define RADIO_INTERRUPT
 
 // CC1101 has the following connections:
-// CS pin:    10
-// GDO0 pin:  2
+// CS pin:    PA4
+// GDO0 pin:  PA1
 // RST pin:   unused
-// GDO2 pin:  3 (optional)
+// GDO2 pin:  PA0
 CC1101 radio = new Module(SPI1_CS, GDO0, RADIOLIB_NC, GDO2, SPI);
 
 // or using RadioShield
 // https://github.com/jgromes/RadioShield
 // CC1101 radio = RadioShield.ModuleA;
-#ifdef RADIO_INTERRUPT
-// flag to indicate that a packet was received
-volatile bool receivedFlag = false;
 
 typedef enum
 {
   RadioMode_Unknown,
   RadioMode_RX,
+#ifdef WITH_TX
   RadioMode_TX,
+#endif // WITH_TX
 } RadioMode;
 
 RadioMode radioMode = RadioMode_Unknown;
+
+#ifdef RADIO_INTERRUPT
+// flag to indicate that a packet was received
+volatile bool receivedFlag = false;
+
 // this function is called when a complete packet
 // is received by the module
 // IMPORTANT: this function MUST be 'void' type
@@ -118,7 +133,12 @@ void setup()
 
   // initialize CC1101 with default settings
   Serial.print(F("[CC1101] Initializing ... "));
+#ifdef X2D_APP
   int state = radio.begin(868.439941, 4.82273, 39.55, 203.125000, 0, 32);
+#endif
+#ifdef X3D_APP
+  int state = radio.begin(869.034, 40.0, 80.0, 270.0, 0, 32);
+#endif
   if (state == RADIOLIB_ERR_NONE)
   {
     Serial.println(F("success!"));
@@ -130,12 +150,28 @@ void setup()
     while (true)
       ;
   }
+#ifdef X2D_APP
   if (radio.setOOK(true) != RADIOLIB_ERR_NONE)
   {
     Serial.println(F("[CC1101] setOOK invalid for this module!"));
     while (true)
       ;
   }
+#endif
+#ifdef X3D_APP
+  if (radio.setOOK(false) != RADIOLIB_ERR_NONE)
+  {
+    Serial.println(F("[CC1101] setOOK invalid for this module!"));
+    while (true)
+      ;
+  }
+  if (radio.setDataShaping(RADIOLIB_SHAPING_NONE) != RADIOLIB_ERR_NONE)
+  {
+    Serial.println(F("[CC1101] setDataShaping invalid for this module!"));
+    while (true)
+      ;
+  }
+#endif
 
   if (radio.setCrcFiltering(false) != RADIOLIB_ERR_NONE)
   {
@@ -144,20 +180,44 @@ void setup()
       ;
   }
 
+#ifdef X2D_APP
   if (radio.setEncoding(0) != RADIOLIB_ERR_NONE)
-  {
-    Serial.println(F("[CC1101] setEncoding invalid for this module!"));
-    while (true)
-      ;
-  }
+#endif
+#ifdef X3D_APP
+    if (radio.setEncoding(0) != RADIOLIB_ERR_NONE)
+#endif
+    {
+      Serial.println(F("[CC1101] setEncoding invalid for this module!"));
+      while (true)
+        ;
+    }
 
+#ifdef X2D_APP
   if (radio.disableSyncWordFiltering(true) != RADIOLIB_ERR_NONE)
   {
     Serial.println(F("[CC1101] setEncoding invalid for this module!"));
     while (true)
       ;
   }
-
+#endif // X2D_APP
+#ifdef X3D_APP
+#if 1
+  static uint8_t syncword[] = {0x81, 0x69};
+  if (radio.setSyncWord(syncword, (uint8_t)sizeof(syncword), 0, true) != RADIOLIB_ERR_NONE)
+  {
+    Serial.println(F("[CC1101] setSyncWord invalid for this module!"));
+    while (true)
+      ;
+  }
+#else
+  if (radio.disableSyncWordFiltering(true) != RADIOLIB_ERR_NONE)
+  {
+    Serial.println(F("[CC1101] setEncoding invalid for this module!"));
+    while (true)
+      ;
+  }
+#endif
+#endif // X3D_APP
   if (radio.disableAddressFiltering() != RADIOLIB_ERR_NONE)
   {
     Serial.println(F("[CC1101] disableAddressFiltering invalid for this module!"));
@@ -165,12 +225,31 @@ void setup()
       ;
   }
 
+#ifdef X2D_APP
   if (radio.fixedPacketLengthMode(255) != RADIOLIB_ERR_NONE)
   {
     Serial.println(F("[CC1101] setPacketMode invalid for this module!"));
     while (true)
       ;
   }
+#endif // X2D_APP
+#ifdef X3D_APP
+#if 0
+  if (radio.variablePacketLengthMode(255) != RADIOLIB_ERR_NONE)
+  {
+    Serial.println(F("[CC1101] setPacketMode invalid for this module!"));
+    while (true)
+      ;
+  }
+#else
+  if (radio.fixedPacketLengthMode(255) != RADIOLIB_ERR_NONE)
+  {
+    Serial.println(F("[CC1101] setPacketMode invalid for this module!"));
+    while (true)
+      ;
+  }
+#endif
+#endif // X3D_APP
 
   if (radio.setOutputPower(5) != RADIOLIB_ERR_NONE)
   {
@@ -179,13 +258,24 @@ void setup()
       ;
   }
 }
-      static uint16_t v = 0;
+
+static uint16_t v = 0;
 static unsigned long deadline;
 static bool deadline_valid = false;
+static unsigned long tx_deadline;
 static RadioMode newRadioMode;
+static int pass = 0;
+static bool initalized = false;
+static X3D_APP_STATE x3d_app_state;
 void loop()
 {
   int state;
+
+  if (!initalized)
+  {
+    x3d_app_state_init(&x3d_app_state, 0x112233, 0x1);
+    initalized = true;
+  }
 
   if (radioMode == RadioMode_Unknown)
   {
@@ -199,6 +289,8 @@ void loop()
     {
       if (newRadioMode == RadioMode_RX)
       {
+
+#ifdef X2D_APP
         // 2 bytes can be set as sync word
         if (radio.setSyncWord(0x2A, 0xAB) == RADIOLIB_ERR_INVALID_SYNC_WORD)
         {
@@ -206,16 +298,17 @@ void loop()
           while (true)
             ;
         }
+#endif // X2D_APP
 
 #ifdef RADIO_INTERRUPT
         receivedFlag = 0;
 
         // start listening for packets
-        //Serial.print(F("[CC1101] Starting to listen ... "));
+        // Serial.print(F("[CC1101] Starting to listen ... "));
         state = radio.startReceive();
         if (state == RADIOLIB_ERR_NONE)
         {
-          //Serial.println(F("success!"));
+          // Serial.println(F("success!"));
         }
         else
         {
@@ -228,19 +321,21 @@ void loop()
         // set the function that will be called
         // when new packet is received
         radio.setGdo0Action(setFlag);
-#endif
+#endif // RADIO_INTERRUPT
       }
       else
       {
+#ifdef X2D_APP
         if (radio.disableSyncWordFiltering(true) != RADIOLIB_ERR_NONE)
         {
           Serial.println(F("[CC1101] disableSyncWordFiltering invalid for this module!"));
           while (true)
             ;
         }
+#endif // X2D_APP
 #ifdef RADIO_INTERRUPT
         radio.clearGdo0Action();
-#endif
+#endif // RADIO_INTERRUPT
       }
       radioMode = newRadioMode;
     }
@@ -260,15 +355,15 @@ void loop()
 #else
     state = radio.receive(data, 256);
 #endif
-      // you can also read received data as byte array
-      /*
-        byte byteArr[8];
-        int state = radio.readData(byteArr, 8);
-      */
 
       if (state == RADIOLIB_ERR_NONE)
       {
+#ifdef X2D_APP
         length = radio.getPacketLength(false);
+#endif // X2D_APP
+#ifdef X3D_APP
+        length = radio.getPacketLength(true);
+#endif // X3D_APP
 
         // packet was successfully received
         Serial.println(F("[CC1101] Received packet!"));
@@ -292,6 +387,7 @@ void loop()
         Serial.print(F("[CC1101] LQI:\t\t"));
         Serial.println(radio.getLQI());
 
+#ifdef X2D_APP
         x2d_decode_state_t decode_state;
         x2d_decode_state_reset(&decode_state);
 
@@ -323,6 +419,23 @@ void loop()
           x2d_print(out2_buffer.buffer, out2_buffer.content_size);
           Serial.print("==================================================\n");
         }
+#endif
+#ifdef X3D_APP
+        // 16 ending bits of the syncword
+        if (data[0] == 0x96 && data[1] == 0x7e)
+        {
+          buffer_t indata_buffer = {&data[2], sizeof(data) - 2, length - 2, buffer_type_byte};
+          uint8_t buffer[256];
+          buffer_t out_buffer = {buffer, sizeof(buffer), 0, buffer_type_byte};
+          ccitt_whitening_decoder_state_t cwd;
+          ccitt_whitening_decoder_reset(&cwd);
+          ccitt_whitening_decoder_process(&cwd, &indata_buffer, &out_buffer);
+
+          Serial.print("\n==================================================\n");
+          x3d_print(&out_buffer.buffer[0], out_buffer.content_size);
+          Serial.print("==================================================\n");
+        }
+#endif
       }
       else if (state == RADIOLIB_ERR_RX_TIMEOUT)
       {
@@ -345,17 +458,22 @@ void loop()
       radio.startReceive();
     }
 #endif
+#ifdef WITH_TX
     if (!deadline_valid)
     {
       deadline = millis() + 4000;
       deadline_valid = true;
       newRadioMode = RadioMode_TX;
     }
+#endif
   }
+#ifdef WITH_TX
   else if (radioMode == RadioMode_TX)
   {
+    Serial.println(F("IN TX"));
     if (!deadline_valid)
     {
+#ifdef X2D_APP
 #if 0
     uint8_t data[256];
     size_t data_length = 0;
@@ -380,7 +498,7 @@ void loop()
     data_length += sizeof(X2D_FOOTER);
 #else
       // uint8_t data[] = {0x2f, 0x68, 0x12, 0x00, 0x85, 0x90, 0x00, 0xfe, 0x42}; // assoc
-      //uint8_t data[] = {0x2f, 0x68, 0x3e, 0x01, 0x05, 0x90, 0x01, 0x03, 0xfe, 0x91}; // set
+      // uint8_t data[] = {0x2f, 0x68, 0x3e, 0x01, 0x05, 0x90, 0x01, 0x03, 0xfe, 0x91}; // set
       uint8_t data[] = {0x2f, 0x68, 0x3e, 0x00, 0x05, 0x94, 0x1a, 0xfe, 0x78};
       size_t data_length = sizeof(data) - 2;
       X2D_FOOTER *footer = (X2D_FOOTER *)&data[data_length];
@@ -391,7 +509,7 @@ void loop()
       Serial.print("==================================================\n");
       x2d_print(data, data_length);
       Serial.print("==================================================\n");
-      #endif
+#endif
 
       x2d_encode_state_t encode_state;
       x2d_encode_state_reset(&encode_state);
@@ -408,29 +526,75 @@ void loop()
         buffer_length = out1_buffer.content_size;
       }
       buffer_length = ((buffer_length - 1) / 8) + 1;
+#endif
+#ifdef X3D_APP
+
+      uint8_t buffer1[256];
+      size_t buffer1_offset = 0;
+      memset(buffer1, 0, sizeof(buffer1));
+
+#if 0
+      //x3d_app_state.slots = (1 << pass)-1;
+      int slot = x3d_app_get_free_slot(&x3d_app_state);
+
+      int buffer_length = x3d_app_create_pairing_message(&x3d_app_state, buffer1, sizeof(buffer1), 4, 0, x3d_app_state.slots, 0, slot, 0, X3D_PAIRING_PAYLOAD_STATUS_Open);
+#endif
+      // Well'com pairing/ up command
+#if 1
+      int buffer_length = 0;
+      if (pass != 0)
+      {
+        // 4th byte
+        // Bit7 | Bit6 | Bit5 | Bit4 | Bit3 | Bit2 | Bit1 | Bit0
+        //   1  |  0   |  0   |  0   |   0  | STOP | DOWN |  UP
+        uint8_t down_data[] = {0x05, 0x98, 0x22, 0x81, 0x00};
+        buffer_length = x3d_app_create_message(&x3d_app_state, buffer1, sizeof(buffer1), X3D_MESSAGE_TYPE_Sensor, down_data, sizeof(down_data), NULL, 0);
+        //  buffer_length = x3d_app_create_pairing_message(&x3d_app_state, buffer1, sizeof(buffer1), 4, 0, x3d_app_state.slots, 0, slot, 0, X3D_PAIRING_PAYLOAD_STATUS_Open);
+      }
+      /*
+      else
+      {
+        // x3d_app_state.msg_id = 3460;
+        uint8_t down_data[] = {0x85, 0x98, 0x22}; // Pairing
+        // 0x05, 0x98, 0x22, 0x20, 0x07 // Unpair
+        // 0x05, 0x98, 0x22, 0x20, 0x0e butée automatique
+        buffer_length = x3d_app_create_message(&x3d_app_state, buffer1, sizeof(buffer1), X3D_MESSAGE_TYPE_Sensor, down_data, sizeof(down_data), NULL, 0);
+      }*/
+#endif
+      pass++;
+
+#endif
       if (buffer_length > 2)
       {
-        #if 0
-        for (int i = 0; i < buffer_length; ++i)
-        {
-          arduino_printf("0x%02x, ", out1_buffer.buffer[i]);
-        }
+        buffer_t indata_buffer = {buffer1, buffer_length, buffer_length, buffer_type_byte};
 
+        // 16 ending bits of the syncword
+        uint8_t buffer[256];
+        buffer[0] = 0x96;
+        buffer[1] = 0x7e;
+        buffer_t out_buffer = {buffer, sizeof(buffer), 2, buffer_type_byte};
+
+        ccitt_whitening_encoder_state_t cwd;
+        ccitt_whitening_encoder_reset(&cwd);
+        ccitt_whitening_encoder_process(&cwd, &indata_buffer, &out_buffer);
+
+#if 1
         Serial.print(F("[CC1101] Data Length:\t\t"));
-        Serial.println(buffer_length);
-        for (int i = 0; i < buffer_length; ++i)
+        Serial.println(out_buffer.content_size);
+        for (int i = 0; i < out_buffer.content_size; ++i)
         {
-          Serial.print(buffer1[i], 16);
+          Serial.print(buffer[i], 16);
         }
         Serial.print("\n");
-        #endif
-        for (int i = 0; i < 1; ++i)
+#endif
+        for (int i = 0; i < 5; ++i)
         {
-          int state = radio.transmit(buffer1, buffer_length);
+          tx_deadline = millis() + 60;
+          int state = radio.transmit(buffer, out_buffer.content_size);
           if (state == RADIOLIB_ERR_NONE)
           {
             // the packet was successfully transmitted
-            //Serial.println(F("success!"));
+            // Serial.println(F("success!"));
           }
           else if (state == RADIOLIB_ERR_PACKET_TOO_LONG)
           {
@@ -443,6 +607,10 @@ void loop()
             Serial.print(F("failed, code "));
             Serial.println(state);
           }
+          while ((long)(tx_deadline - millis()) > 0)
+          {
+            delay((tx_deadline - millis()) / 2);
+          }
         }
       }
     }
@@ -453,6 +621,7 @@ void loop()
       newRadioMode = RadioMode_RX;
     }
   }
+#endif
 }
 
 extern "C" void HardFault_Handler(void)

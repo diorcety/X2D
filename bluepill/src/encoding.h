@@ -41,6 +41,14 @@ typedef struct
 
 typedef struct
 {
+    uint8_t key_msb;
+    uint8_t key_lsb;
+} ccitt_whitening_decoder_state_t;
+
+typedef ccitt_whitening_decoder_state_t ccitt_whitening_encoder_state_t;
+
+typedef struct
+{
     bool flush;
 } buffer_transcoder_state_t;
 
@@ -73,6 +81,12 @@ extern "C"
 
     bool biphase_mark_encoder_reset(biphase_mark_encoder_state_t *state);
     PROCESS_RESULT biphase_mark_encoder_process(biphase_mark_encoder_state_t *state, buffer_t *in_data, buffer_t *out_data);
+
+    bool ccitt_whitening_decoder_reset(ccitt_whitening_decoder_state_t *state);
+    PROCESS_RESULT ccitt_whitening_decoder_process(ccitt_whitening_decoder_state_t *state, buffer_t *in_data, buffer_t *out_data);
+
+    bool ccitt_whitening_encoder_reset(ccitt_whitening_encoder_state_t *state);
+    PROCESS_RESULT ccitt_whitening_encoder_process(ccitt_whitening_encoder_state_t *state, buffer_t *in_data, buffer_t *out_data);
 
     bool buffer_transcoder_reset(buffer_transcoder_state_t *state);
     bool buffer_transcoder_flush(buffer_transcoder_state_t *state, bool flush);
