@@ -2,6 +2,7 @@
 #define X2D_SENSOR_H
 
 #include "x2d_entity.h"
+#include "esphome/components/text_sensor/text_sensor.h"
 
 class X2DSensor : public X2DEntity, public esphome::text_sensor::TextSensor
 {

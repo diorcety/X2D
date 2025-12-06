@@ -1,7 +1,7 @@
 #ifndef CC1101_X2D_H
 #define CC1101_X2D_H
 
-#include "esphome.h"
+#include "esphome/core/component.h"
 
 #pragma push_macro("yield")
 #pragma push_macro("millis")
@@ -52,7 +52,6 @@ public:
   CC1101_X2D(int CSN, int GDO0, int GDO2 = RADIOLIB_NC);
 
 protected:
-  float get_setup_priority() const override;
   void setup() override;
   void loop() override;
 
@@ -71,7 +70,5 @@ public:
   callback_registration addCallback(callback_t callback);
   bool removeCallback(callback_registration callbackId);
 };
-
-#define get_cc1101_x2d(id) (*((CC1101_X2D *)id))
 
 #endif

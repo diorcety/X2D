@@ -1,7 +1,7 @@
 #ifndef X2D_ENTITY_H
 #define X2D_ENTITY_H
 
-#include "esphome.h"
+#include "esphome/core/component.h"
 #include "cc1101_x2d.h"
 #include "x2d.h"
 

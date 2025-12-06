@@ -1,6 +1,8 @@
 #include "cc1101_x2d.h"
 #include "x2d_encoding.h"
 #include "x2d.h"
+#include "esphome/core/hal.h"
+#include "esphome/core/helpers.h"
 
 using namespace esphome;
 
@@ -11,11 +13,6 @@ CC1101_X2D::CC1101_X2D(int CSN, int GDO0, int GDO2) : module(CSN, GDO0, RADIOLIB
   callback_registration_uid = 0;
   _GDO0 = GDO0;
   radioMode = RadioMode_Unknown;
-}
-
-float CC1101_X2D::get_setup_priority() const
-{
-  return esphome::setup_priority::HARDWARE;
 }
 
 void CC1101_X2D::setup()
@@ -118,7 +115,7 @@ void CC1101_X2D::receiveMode()
 
   // set the function that will be called
   // when new packet is received
-  radio.setGdo0Action(setFlag);
+  radio.setGdo0Action(setFlag, RISING);
 
   radioMode = RadioMode_RX;
   radioModeTimestamp = esphome::millis();
@@ -154,8 +151,6 @@ void CC1101_X2D::loop()
       uint8_t data[256];
       // you can read received data as an Arduino String
       int state = radio.readData(data, 256);
-      // reset flag
-      receivedFlag = false;
       if (state == RADIOLIB_ERR_NONE)
       {
         ESP_LOGD("CC1101_X2D", "received packet!");
@@ -203,6 +198,7 @@ void CC1101_X2D::loop()
           ESP_LOGD("CC1101_X2D", "Decode failure");
         }
       }
+      receiveMode();
     }
   }
 }
@@ -225,7 +221,7 @@ bool CC1101_X2D::sendX2DFrame(uint8_t *data, size_t data_length)
   while (!x2d_encode(&encode_state, &indata_buffer, &out1_buffer, false))
   {
     indata_buffer.content_size = data_length;
-    if (((out1_buffer.content_size - 1) / 8) + 1 >= sizeof(buffer1)/2)
+    if (((out1_buffer.content_size - 1) / 8) + 1 >= sizeof(buffer1) / 2)
       break;
     buffer_length = out1_buffer.content_size;
   }
@@ -233,6 +229,10 @@ bool CC1101_X2D::sendX2DFrame(uint8_t *data, size_t data_length)
   if (buffer_length > 2)
   {
     transmitMode();
+
+    ESP_LOGD("CC1101_X2D", "Transmitting X2D Frame (%u bytes): %s",
+             buffer_length,
+             format_hex_pretty(buffer1, buffer_length).c_str(), ' ');
 
     int state = radio.transmit(buffer1, buffer_length);
     if (state == RADIOLIB_ERR_NONE)

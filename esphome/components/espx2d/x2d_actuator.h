@@ -48,5 +48,4 @@ private:
     void setLevel(X2D_FUNCTIONING_MODE mode);
 };
 
-#define get_x2d_heating_level_actuator(id) (*((X2DHeatingLevelActuator *)id))
 #endif
