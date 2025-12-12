@@ -1,4 +1,6 @@
 import random
+from typing import Tuple, List
+
 import X2D as x2d
 from encoding import Processor, OOK, BiphaseMark, Manchester, X2D, X2DMessage, Bitstream, process
 
@@ -7,14 +9,7 @@ from encoding import Processor, OOK, BiphaseMark, Manchester, X2D, X2DMessage, B
 # Helpers
 #
 
-def print_rflink_line(msg):
-    id = msg.source.id << 16 | ((msg.house << 8) & 0xFF00) | ((msg.house >> 8) & 0x00FF)
-    rc = (msg.data[-2] << 8 | msg.data[-1] << 0) if len(msg.data) >= 2 else 0
-    s = (msg.data[-4] << 8 | msg.data[-3] << 0) if len(msg.data) >= 4 else 0
-    print(f"X2D;ID={id:07x};SWITCH=?;CMD=?;EXT={msg.source.type};RC={rc:04x};S={s:04x};BAT=?;")
-
-
-def print_message(name, msgs):
+def print_message(name: str, msgs: List[X2DMessage]):
     print("#" * 80 + "\n" + name + "\n" + "#" * 80)
     assert len(msgs) > 0
     for msg in msgs:
@@ -27,7 +22,7 @@ class RFLinkDecoder(Processor):
         super().__init__(*args, **kwargs)
         self._bit = 0
 
-    def data(self, in_data):
+    def data(self, in_data: bytes) -> Tuple[int, bytes, Processor.Status]:
         out_data = bytearray()
         idx = 0
         s = Processor.Status.CONTINUE
@@ -62,7 +57,7 @@ def get_messages_from_raw_processors(sample_rate, symbol_rate):
 
 
 def get_messages_from_cc1101_manchester_processors():
-    return [Bitstream.Encoder(), Manchester.Encoder(bytearray([0]))] + get_messages_from_baud_processors()
+    return [Bitstream.Encoder(), Manchester.Encoder(bytes([0]))] + get_messages_from_baud_processors()
 
 
 def get_messages_from_rflink_debug_processors():
@@ -74,7 +69,7 @@ def get_messages_from_rflink_debug_processors():
 #
 """
 with open("raw3.bin", 'rb') as file:
-    data = bytearray(file.read())
+    data = bytes(file.read())
     in_data_1 = process([OOK.Decoder(int(2000000 / 20), int(4820), verbose=False, throw=False)], data)
     # in_data_2 = process([BiphaseMark.Decoder(verbose=False)], in_data_1)
     # in_data_3 = process([X2D.Decoder(verbose=False, throw=False)], in_data_2)
@@ -85,7 +80,7 @@ with open("raw3.bin", 'rb') as file:
 """
 """
 with open("raw4.bin", 'rb') as file:
-    data = bytearray(file.read())
+    data = bytes(file.read())
     #in_data_1 = process([OOK.Decoder(int(2000000 / 20), int(4820), verbose=False, throw=False)], data)
     #in_data_2 = process([BiphaseMark.Decoder(verbose=False)], in_data_1)
     #in_data_3 = process([X2D.Decoder(verbose=True, throw=False)], in_data_2)
@@ -104,7 +99,7 @@ for d in [[0x33, 0x33, 0x2a, 0xab, 0x55, 0x2c, 0xcd, 0x2b, 0x53, 0x32, 0xb3, 0x3
 """
 """
 with open("raw.bin", 'rb') as file:
-    in_data_0 = bytearray(file.read())
+    in_data_0 = bytes(file.read())
     in_data_1 = process([OOK.Decoder(2000000, 4820, verbose=False, throw=False)], in_data_0)
     in_data_2 = process([BiphaseMark.Decoder(verbose=False)], in_data_1)
     in_data_3 = process([X2D.Decoder(verbose=False)], in_data_2)
@@ -121,7 +116,7 @@ with open("raw.bin", 'rb') as file:
     # print(''.join('0x{:02x}, '.format(x) for x in out_data_0))
 
 with open("raw2.bin", 'rb') as file:
-    in_data_0 = bytearray(file.read())
+    in_data_0 = bytes(file.read())
     in_data_1 = process([OOK.Decoder(2000000, 4820, verbose=False, throw=False)], in_data_0)
     in_data_1_1 = process([Bitstream.Decoder(False, verbose=False)], in_data_1)
     # print(''.join('0x{:02x}, '.format(x) for x in in_data_1_1))
@@ -131,7 +126,7 @@ with open("raw2.bin", 'rb') as file:
     print_message("raw2.bin", msgs)
 
 with open("baud.bin") as file:
-    data = bytearray([1 if a == '1' else 0 for a in file.read()])
+    data = bytes([1 if a == '1' else 0 for a in file.read()])
     msgs = process(get_messages_from_baud_processors(), data, lambda x: random.randint(1, min(len(x), 64)))
     print_message("baud.bin", msgs)
 """

@@ -2,32 +2,33 @@ import argparse
 import asyncio
 import logging
 import sys
+from typing import Tuple
+
+from construct import Sequence
 
 from encoding import Processor
 
 logger = logging.getLogger(__name__)
 
 
-def to_hex(data):
+def to_hex(data: bytes) -> str:
     return ', '.join('0x{:02x}'.format(x) for x in data)
 
 
 class Dumper(Processor):
-    def data(self, in_data):
-        global last
+    def data(self, in_data: Sequence[bytes]) -> Tuple[int, Sequence[bytes], Processor.Status]:
         out_data = []
         idx = 0
         while idx < len(in_data):
             data = in_data[idx]
             print(to_hex(data))
-            last = data
             out_data.append(data)
             idx += 1
         return idx, out_data, Processor.Status.CONTINUE
 
 
 class X3DHandler:
-    def __init__(self, bitrate, symrate):
+    def __init__(self, bitrate: int, symrate: int):
         from encoding import Packetizer
         from encoding import CcittWhitening
         from encoding import X3DMessage
@@ -36,14 +37,14 @@ class X3DHandler:
             Packetizer.Decoder(
                 bitrate,
                 symrate,
-                preamble=bytearray([0xAA, 0xAA, 0xAA, 0xAA]),
-                syncword=bytearray([0x81, 0x69, 0x96, 0x7e]),
+                preamble=bytes([0xAA, 0xAA, 0xAA, 0xAA]),
+                syncword=bytes([0x81, 0x69, 0x96, 0x7e]),
                 verbose=False
             ),
             Duplicator.Decoder(),
-            #Dumper(),
+            # Dumper(),
             CcittWhitening.Decoder(),
-            #Dumper(),
+            # Dumper(),
             X3DMessage.Decoder(throw=False)]
 
     def __call__(self, *args, **kwargs):
@@ -64,8 +65,8 @@ class X3DHandler:
                 print(msg)
 
 
-def x2d_handler(data):
-    pass
+def x2d_handler(*args, **kwargs):
+    raise NotImplementedError()
 
 
 async def run_server(host: str, port: int, handler):

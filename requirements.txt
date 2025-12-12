@@ -1,2 +1,2 @@
-construct
+construct>=2.10.69
 crc

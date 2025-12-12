@@ -1,10 +1,11 @@
 import random
+from typing import List, Sequence, Tuple
 
 from X3D import MessageType
 from encoding import Packetizer, X3DMessage, process, CcittWhitening, Duplicator, Processor
 
 
-def print_message(name, msgs):
+def print_message(name: str, msgs: List[X3DMessage]):
     print("#" * 80 + "\n" + name + "\n" + "#" * 80)
     assert len(msgs) > 0
     for msg in msgs:
@@ -12,47 +13,41 @@ def print_message(name, msgs):
     print("")
 
 
-def remove_consecutive_duplicates(lst):
-    if not lst:
-        return []
-    result = [lst[0]]  # start with the first element
-    for item in lst[1:]:
-        if item != result[-1]:
-            result.append(item)
-    return result
-
-
-def to_hex(data):
+def to_hex(data: bytes) -> str:
     return ', '.join('0x{:02x}'.format(x) for x in data)
 
 
-filename = "raw_x3d.bin"
+class Dumper(Processor):
+    def __init__(self):
+        super().__init__()
+        self.last = None
 
+    def data(self, in_data: Sequence[bytes]) -> Tuple[int, Sequence[bytes], Processor.Status]:
+        out_data = []
+        idx = 0
+        while idx < len(in_data):
+            data = in_data[idx]
+            print(to_hex(data))
+            self.last = data
+            out_data.append(data)
+            idx += 1
+        return idx, out_data, Processor.Status.CONTINUE
+
+
+filename = "raw_x3d.bin"
+dumper = None
 
 if filename is not None:
     with open(filename, 'rb') as file:
-        last = None
-        class Dumper(Processor):
-            def data(self, in_data):
-                global last
-                out_data = []
-                idx = 0
-                while idx < len(in_data):
-                    data = in_data[idx]
-                    print(to_hex(data))
-                    last = data
-                    out_data.append(data)
-                    idx += 1
-                return idx, out_data, Processor.Status.CONTINUE
-
-        data = bytearray(file.read())
+        dumper = Dumper()
+        data = bytes(file.read())
         msgs = process([
-            Packetizer.Decoder(40_000 * 10, 40_000, preamble=bytearray([0xAA, 0xAA, 0xAA, 0xAA]),
-                               syncword=bytearray([0x81, 0x69, 0x96, 0x7e]), verbose=False,
+            Packetizer.Decoder(40_000 * 10, 40_000, preamble=bytes([0xAA, 0xAA, 0xAA, 0xAA]),
+                               syncword=bytes([0x81, 0x69, 0x96, 0x7e]), verbose=False,
                                throw=False),
             CcittWhitening.Decoder(),
             Duplicator.Decoder(),
-            Dumper(),
+            dumper,
             X3DMessage.Decoder(verbose=True)
         ], data, lambda x: random.randint(1, min(len(x), 1024)))  # Test the behaviour with irregular packet size
         for m in msgs:
@@ -79,8 +74,8 @@ msgs = process([X3DMessage.Encoder(verbose=False)], [d])
 for msg in msgs:
     print(to_hex(msg))
 
-if filename == "raw_x3d.bin":
-    assert msgs[0] == last
+if filename == "raw_x3d.bin" and dumper is not None:
+    assert msgs[0] == dumper.last
 
 # Encode, decode and check that we have the same bytes
 out_data_1 = process([CcittWhitening.Encoder()], [msgs[0]])
@@ -93,14 +88,15 @@ in_data_1 = process([Packetizer.Decoder(40_000 * 10, 40_000, preamble=bytearray(
 in_data_2 = process([CcittWhitening.Decoder()], in_data_1)
 assert msgs[0] == in_data_2[0]
 
-
 # Data from https://github.com/mr-sven/x3d-rfm-esp32/blob/main/X3D-Message-Log.md
 d1 = bytes([0x26, 0xFF, 0x40, 0x02, 0x0C, 0x10, 0x02, 0x03, 0x84, 0x85, 0x98, 0x00, 0xAA, 0xBB, 0xFC, 0xE5, 0x04, 0x00,
-      0x00, 0x00, 0x00, 0x1F, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x00, 0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xF6, 0x3C, 0x30,
-      0x7D])
-d2 = bytes([0x1F, 0xFF, 0x32, 0x02, 0x0C, 0xAA, 0xBB, 0xCC, 0x00, 0x85, 0x98, 0x00, 0xAA, 0xBB, 0xFB, 0x4D, 0x40, 0x00, 0x00, 0x01, 0x00 , 0x1F, 0xFF , 0x00, 0x00 , 0x12, 0x34 , 0xE0, 0x00, 0x82, 0x0D])
+            0x00, 0x00, 0x00, 0x1F, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x00, 0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xF6, 0x3C,
+            0x30,
+            0x7D])
+d2 = bytes(
+    [0x1F, 0xFF, 0x32, 0x02, 0x0C, 0xAA, 0xBB, 0xCC, 0x00, 0x85, 0x98, 0x00, 0xAA, 0xBB, 0xFB, 0x4D, 0x40, 0x00, 0x00,
+     0x01, 0x00, 0x1F, 0xFF, 0x00, 0x00, 0x12, 0x34, 0xE0, 0x00, 0x82, 0x0D])
 msgs = process([X3DMessage.Decoder(verbose=True)], [d1, d2])
 for i, m in enumerate(msgs):
     print(i)
     print(m)
-

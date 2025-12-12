@@ -1,9 +1,6 @@
 from construct import *
 from enum import IntEnum
 
-from XxD import OffsettedEnd
-
-
 class Device(IntEnum):
     Tyxia_ZZAA = 0
     Calybox = 3
@@ -239,14 +236,32 @@ MeterReadingMessage = Struct(
 # Functions
 #
 
-def x2d_crc(data):
+def x2d_crc(data: bytes) -> int:
+    """
+    Calculate CRC checksum for X2D protocol data.
+
+    Args:
+        data: Byte array containing data to calculate CRC for
+
+    Returns:
+        Integer representing the calculated CRC value
+    """
     crc = 0
     for i in data:
         crc += int(i)
     return int((~crc) + 1) & 0xFFFF
 
 
-def _offset(context):
+def _offset(context) -> int:
+    """
+    Calculate offset for data parsing based on rolling code flag.
+
+    Args:
+        context: Parsing context containing control information
+
+    Returns:
+        Integer offset value (-2 if rolling_code is True, -0 otherwise)
+    """
     return -2 if context.control.rolling_code else -0
 
 
@@ -302,9 +317,29 @@ _x2d_struct = Struct(
 )
 
 
-def parse_x2d_message(data):
+# 24. Parse an X2D message from raw data
+def parse_x2d_message(data: bytes) -> dict:
+    """
+    Parse X2D message data into structured format.
+
+    Args:
+        data: The raw X2D message data to parse
+
+    Returns:
+        The parsed message structure
+    """
     return _x2d_struct.parse(bytearray(data)).body.value
 
 
-def format_x2d_message(msg):
+# 25. Format a message structure into X2D protocol format
+def format_x2d_message(msg: dict) -> bytes:
+    """
+    Format message structure into X2D message data.
+
+    Args:
+        msg: The message structure to format
+
+    Returns:
+        The formatted X2D message data
+    """
     return _x2d_struct.build(dict(body=dict(value=msg)))
